@@ -1,0 +1,1636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Nightclub — Builder Execution Network (Prototype)</title>
+<!--
+  NIGHTCLUB — immersive 3D glassmorphism prototype
+  ------------------------------------------------------------------
+  Single self-contained file. No backend, no API keys, no paid services.
+  Everything here is SIMULATED local demo data persisted in localStorage.
+
+  File map
+   1. HTML structure            (below)
+   2. CSS variables + design system
+   3. Background 3D environment (Three.js via CDN, CSS 3D fallback)
+   4. Navigation / router
+   5. Module rendering          (one render function per view)
+   6. Demo data
+   7. Interaction handlers      (event delegation: data-action / data-form / data-bind)
+   8. LocalStorage persistence
+   9. Responsive behaviour      (CSS media queries + drawer logic)
+-->
+<style>
+/* =====================================================================
+   2. CSS VARIABLES + DESIGN SYSTEM
+   ===================================================================== */
+:root{
+  --bg:#090A0D; --bg2:#111319;
+  --glass:rgba(255,255,255,.055); --glass-b:rgba(255,255,255,.13);
+  --tx:#F3F0E9; --tx2:#A4A39F; --tx3:#75746f;
+  --gold:#C6A76B; --bronze:#92764B; --ivory:#E7E0D2; --accent:#A8B7C8;
+  --ok:#8FB59A; --warn:#D1A25B; --bad:#C98282;
+  --r:10px; --r-lg:14px;
+  --ease:cubic-bezier(.22,.8,.24,1);
+  --sbw:264px;
+  --serif:"Cormorant Garamond","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--tx);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3,h4{font-family:var(--serif);font-weight:600;letter-spacing:.01em;color:var(--ivory)}
+h1{font-size:2.15rem;line-height:1.15} h2{font-size:1.45rem} h3{font-size:1.15rem} h4{font-size:1rem;font-family:var(--sans);font-weight:600}
+p{color:var(--tx2)} a{color:var(--gold)}
+small,.muted{color:var(--tx2)} .tiny{font-size:.78rem;color:var(--tx3)}
+.eyebrow{font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:6px}
+::selection{background:rgba(198,167,107,.35)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:10px}
+
+/* ---- background layers ---- */
+#bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:block}
+#bg-veil{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(1200px 700px at 70% -10%,rgba(198,167,107,.07),transparent 60%),
+             radial-gradient(900px 600px at 0% 100%,rgba(168,183,200,.06),transparent 60%),
+             linear-gradient(180deg,rgba(9,10,13,.35),rgba(9,10,13,.62))}
+#bg-fallback{position:fixed;inset:0;z-index:0;display:none;overflow:hidden;perspective:900px}
+.no-webgl #bg{display:none}.no-webgl #bg-fallback{display:block}
+.fb-cube{position:absolute;left:12%;top:28%;width:160px;height:160px;transform-style:preserve-3d;animation:fbspin 40s linear infinite}
+.fb-cube i{position:absolute;inset:0;border:1px solid rgba(198,167,107,.35);background:rgba(231,224,210,.035)}
+.fb-cube i:nth-child(1){transform:translateZ(80px)}.fb-cube i:nth-child(2){transform:rotateY(180deg) translateZ(80px)}
+.fb-cube i:nth-child(3){transform:rotateY(90deg) translateZ(80px)}.fb-cube i:nth-child(4){transform:rotateY(-90deg) translateZ(80px)}
+.fb-cube i:nth-child(5){transform:rotateX(90deg) translateZ(80px)}.fb-cube i:nth-child(6){transform:rotateX(-90deg) translateZ(80px)}
+.fb-orb{position:absolute;border-radius:50%;background:radial-gradient(circle at 30% 28%,rgba(255,255,255,.28),rgba(168,183,200,.08) 55%,transparent 70%);border:1px solid rgba(255,255,255,.1);animation:fbfloat 14s ease-in-out infinite}
+.fb-orb.o1{width:220px;height:220px;right:10%;top:14%}.fb-orb.o2{width:90px;height:90px;right:30%;bottom:18%;animation-delay:-4s}.fb-orb.o3{width:140px;height:140px;left:38%;bottom:8%;animation-delay:-8s}
+@keyframes fbspin{to{transform:rotateX(360deg) rotateY(360deg)}}
+@keyframes fbfloat{50%{transform:translateY(-26px)}}
+
+/* ---- boot screen ---- */
+#boot{position:fixed;inset:0;z-index:300;background:var(--bg);display:grid;place-content:center;justify-items:center;gap:14px;transition:opacity .6s var(--ease),visibility .6s}
+#boot.done{opacity:0;visibility:hidden}
+.boot-mark{width:56px;height:56px;border:1px solid var(--gold);display:grid;place-items:center;font:600 28px var(--serif);color:var(--gold)}
+.spinner{width:22px;height:22px;border:2px solid rgba(255,255,255,.12);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---- glass surfaces (each one deliberately different) ---- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass-nav,.glass-side,.glass-panel,.glass-card,.glass-modal,.glass-menu,.glass-toast,.glass-chat{background:rgba(17,19,25,.94)!important}
+}
+.glass-nav{background:rgba(14,15,19,.55);-webkit-backdrop-filter:blur(24px) saturate(140%);backdrop-filter:blur(24px) saturate(140%);border-bottom:1px solid var(--glass-b);box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+.glass-side{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));background-color:rgba(10,11,14,.62);-webkit-backdrop-filter:blur(28px) saturate(130%);backdrop-filter:blur(28px) saturate(130%);border-right:1px solid var(--glass-b);box-shadow:1px 0 0 rgba(255,255,255,.04) inset,12px 0 40px rgba(0,0,0,.25)}
+.glass-panel{background:var(--glass);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border:1px solid var(--glass-b);border-radius:var(--r-lg);box-shadow:0 1px 0 rgba(255,255,255,.08) inset,0 -1px 0 rgba(0,0,0,.2) inset,0 2px 4px rgba(0,0,0,.2),0 18px 50px rgba(0,0,0,.28)}
+.glass-card{position:relative;background:linear-gradient(160deg,rgba(255,255,255,.07),rgba(255,255,255,.03));-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border:1px solid var(--glass-b);border-radius:var(--r);box-shadow:0 1px 0 rgba(255,255,255,.07) inset,0 10px 30px rgba(0,0,0,.25);transition:transform .35s var(--ease),border-color .35s,box-shadow .35s;overflow:hidden}
+.glass-card::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(260px circle at var(--mx,50%) var(--my,0%),rgba(198,167,107,.11),transparent 62%);opacity:0;transition:opacity .3s}
+.glass-card:hover{transform:translateY(-3px);border-color:rgba(198,167,107,.45);box-shadow:0 1px 0 rgba(255,255,255,.1) inset,0 18px 44px rgba(0,0,0,.4)}
+.glass-card:hover::before{opacity:1}
+.glass-card.static:hover{transform:none}
+.glass-modal{background:rgba(17,19,25,.8);-webkit-backdrop-filter:blur(34px) saturate(150%);backdrop-filter:blur(34px) saturate(150%);border:1px solid rgba(255,255,255,.17);border-radius:var(--r-lg);box-shadow:0 1px 0 rgba(255,255,255,.1) inset,0 40px 120px rgba(0,0,0,.65)}
+.glass-menu{background:rgba(20,22,28,.84);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);border:1px solid var(--glass-b);border-radius:var(--r);box-shadow:0 18px 50px rgba(0,0,0,.5);padding:6px}
+.glass-toast{background:rgba(24,26,32,.86);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);border:1px solid var(--glass-b);border-left:3px solid var(--gold);border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.glass-chat{background:rgba(255,255,255,.04);-webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);border:1px solid var(--glass-b);border-radius:var(--r-lg)}
+[data-tip]{position:relative}
+[data-tip]:hover::after,[data-tip]:focus-visible::after{content:attr(data-tip);position:absolute;z-index:80;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);white-space:nowrap;max-width:260px;padding:5px 9px;font-size:.74rem;color:var(--tx);background:rgba(10,11,14,.92);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border:1px solid var(--glass-b);border-radius:6px;pointer-events:none}
+.side-collapsed [data-tip].nav-item:hover::after{left:calc(100% + 10px);bottom:auto;top:50%;transform:translateY(-50%)}
+
+/* ---- app shell ---- */
+#app{position:relative;z-index:2;display:grid;grid-template-columns:var(--sbw) minmax(0,1fr);min-height:100vh;transition:grid-template-columns .4s var(--ease)}
+.side-collapsed #app{--sbw:78px}
+#sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:18px 12px;overflow-y:auto;overflow-x:hidden;z-index:30;transition:transform .4s var(--ease)}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 8px 16px}
+.brand-mark{flex:none;width:36px;height:36px;border:1px solid var(--gold);display:grid;place-items:center;font:600 20px var(--serif);color:var(--gold);box-shadow:0 0 24px rgba(198,167,107,.18) inset}
+.brand-name{font:600 1.25rem var(--serif);letter-spacing:.2em;color:var(--ivory);white-space:nowrap}
+.brand-sub{font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:var(--tx3);white-space:nowrap}
+.meander{height:8px;margin:0 8px 14px;opacity:.55;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='8'%3E%3Cpath d='M0 7.5h4v-6h8v4H8v-2h2' fill='none' stroke='%23C6A76B' stroke-width='1'/%3E%3Cpath d='M12 7.5h4v-6h8' fill='none' stroke='%23C6A76B' stroke-width='1'/%3E%3C/svg%3E");background-repeat:repeat-x}
+.nav-label{font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:var(--tx3);padding:12px 12px 6px;white-space:nowrap}
+.nav-item{position:relative;display:flex;align-items:center;gap:12px;width:100%;padding:9px 12px;border:0;background:none;border-radius:8px;color:var(--tx2);cursor:pointer;text-align:left;white-space:nowrap;transition:color .25s,background .25s,transform .2s}
+.nav-item svg{flex:none;width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nav-item:hover{color:var(--tx);background:radial-gradient(120px circle at 20% 50%,rgba(198,167,107,.14),rgba(255,255,255,.04))}
+.nav-item.active{color:var(--gold);background:linear-gradient(90deg,rgba(198,167,107,.14),rgba(198,167,107,.02))}
+.nav-item.active::before{content:"";position:absolute;left:-12px;top:20%;bottom:20%;width:3px;background:var(--gold);border-radius:0 3px 3px 0;box-shadow:0 0 12px var(--gold)}
+.nav-item .count{margin-left:auto;font-size:.68rem;background:rgba(198,167,107,.18);color:var(--gold);padding:1px 7px;border-radius:20px}
+.nav-text{transition:opacity .2s}
+.side-collapsed .nav-text,.side-collapsed .brand-text,.side-collapsed .nav-label,.side-collapsed .count{display:none}
+.side-collapsed .nav-item{justify-content:center;padding:11px 0}
+.side-foot{margin-top:auto;padding:14px 8px 0;font-size:.7rem;color:var(--tx3)}
+.side-collapsed .side-foot{display:none}
+#main{min-width:0;display:flex;flex-direction:column}
+#topbar{position:sticky;top:0;z-index:20;height:60px;display:flex;align-items:center;gap:10px;padding:0 24px}
+#top-title{font:600 1.15rem var(--serif);color:var(--ivory);letter-spacing:.02em}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:.7rem;padding:4px 10px;border:1px solid var(--glass-b);border-radius:20px;color:var(--tx2);background:rgba(255,255,255,.04);cursor:pointer}
+.pill:hover{border-color:var(--gold);color:var(--tx)}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:var(--warn)}
+.icon-btn{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:8px;border:1px solid transparent;background:none;color:var(--tx2);cursor:pointer;transition:all .25s}
+.icon-btn:hover{color:var(--tx);border-color:var(--glass-b);background:rgba(255,255,255,.06)}
+.icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.icon-btn .badge-dot{position:absolute;top:3px;right:3px;min-width:16px;height:16px;border-radius:10px;background:var(--gold);color:#16110a;font-size:.62rem;font-weight:700;display:grid;place-items:center;padding:0 4px}
+#nav-toggle{display:none}
+#view{padding:28px 28px 80px;max-width:1280px;width:100%;margin:0 auto;outline:none}
+#view.enter{animation:pagein .5s var(--ease)}
+@keyframes pagein{from{opacity:0;transform:translateY(14px) scale(.995)}to{opacity:1;transform:none}}
+.scrim-nav{display:none}
+
+/* ---- layout helpers ---- */
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.split{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.between{justify-content:space-between}
+.stack{display:flex;flex-direction:column;gap:10px}
+.pad{padding:20px} .pad-s{padding:14px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.page-head p{max-width:680px;margin-top:6px}
+.sec-title{display:flex;align-items:center;justify-content:space-between;margin:26px 0 12px}
+.sec-title h2{font-size:1.25rem}
+hr.rule{border:0;height:1px;background:linear-gradient(90deg,transparent,var(--glass-b),transparent);margin:14px 0}
+.empty{text-align:center;padding:36px 16px;color:var(--tx2)}
+.note{font-size:.78rem;color:var(--tx2);border-left:2px solid var(--bronze);padding:6px 12px;background:rgba(255,255,255,.025);border-radius:0 6px 6px 0}
+.demo-banner{display:flex;gap:10px;align-items:center;padding:9px 14px;border:1px dashed rgba(209,162,91,.5);color:var(--warn);border-radius:8px;font-size:.78rem;margin-bottom:16px;background:rgba(209,162,91,.05)}
+
+/* ---- controls ---- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:8px;border:1px solid var(--glass-b);background:rgba(255,255,255,.05);color:var(--tx);cursor:pointer;font-size:.84rem;font-weight:500;transition:transform .2s var(--ease),background .25s,border-color .25s,box-shadow .25s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.28);transform:translateY(-1px);box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.btn:active{transform:translateY(1px) scale(.97);box-shadow:none}
+.btn.primary{background:linear-gradient(180deg,#d3b87d,var(--gold));color:#17120a;border-color:#e0c68e;font-weight:600}
+.btn.primary:hover{background:linear-gradient(180deg,#e0c68e,#cfb177);box-shadow:0 8px 26px rgba(198,167,107,.3)}
+.btn.danger{color:var(--bad);border-color:rgba(201,130,130,.4)}
+.btn.danger:hover{background:rgba(201,130,130,.12)}
+.btn.sm{padding:5px 10px;font-size:.76rem}.btn.ghost{background:none;border-color:transparent;color:var(--tx2)}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;font-size:.74rem;border-radius:20px;border:1px solid var(--glass-b);background:rgba(255,255,255,.04);color:var(--tx2);cursor:default}
+button.chip{cursor:pointer}button.chip:hover,.chip.on{border-color:var(--gold);color:var(--gold)}
+.chip .x{cursor:pointer;opacity:.7}.chip .x:hover{opacity:1;color:var(--bad)}
+.badge{display:inline-block;font-size:.66rem;letter-spacing:.04em;padding:2px 8px;border-radius:4px;border:1px solid var(--glass-b);color:var(--tx2);white-space:nowrap}
+.b-self{color:var(--tx2)}.b-peer{color:var(--accent);border-color:rgba(168,183,200,.45)}.b-art{color:var(--gold);border-color:rgba(198,167,107,.55);background:rgba(198,167,107,.08)}
+.b-ok{color:var(--ok);border-color:rgba(143,181,154,.45)}.b-warn{color:var(--warn);border-color:rgba(209,162,91,.45)}.b-bad{color:var(--bad);border-color:rgba(201,130,130,.45)}
+input[type=text],input[type=search],input[type=email],input[type=date],input[type=time],input[type=number],select,textarea{width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid var(--glass-b);border-radius:8px;transition:border-color .25s,box-shadow .25s;color-scheme:dark}
+select option{background:#14161c}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(198,167,107,.14)}
+textarea{min-height:84px;resize:vertical}
+label.field{display:flex;flex-direction:column;gap:5px;font-size:.78rem;color:var(--tx2)}
+.form{display:flex;flex-direction:column;gap:12px}
+.inline-form{display:flex;gap:8px;flex-wrap:wrap}.inline-form input{flex:1;min-width:140px}
+.switch{position:relative;display:inline-block;width:40px;height:22px;flex:none}
+.switch input{position:absolute;opacity:0;inset:0;cursor:pointer;z-index:1;margin:0}
+.switch span{position:absolute;inset:0;border-radius:20px;background:rgba(255,255,255,.12);border:1px solid var(--glass-b);transition:all .3s var(--ease)}
+.switch span::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--tx2);transition:all .3s var(--ease)}
+.switch input:checked+span{background:rgba(198,167,107,.3);border-color:var(--gold)}
+.switch input:checked+span::after{left:20px;background:var(--gold)}
+.switch input:focus-visible+span{outline:2px solid var(--gold);outline-offset:2px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.setting-row:last-child{border-bottom:0}
+.setting-row p{font-size:.8rem}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--glass-b);margin-bottom:18px;overflow-x:auto}
+.tab{padding:9px 14px;background:none;border:0;border-bottom:2px solid transparent;color:var(--tx2);cursor:pointer;white-space:nowrap;transition:all .25s;margin-bottom:-1px}
+.tab:hover{color:var(--tx)}.tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+.bar{height:6px;border-radius:6px;background:rgba(255,255,255,.08);overflow:hidden}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--bronze),var(--gold));border-radius:6px;transition:width .6s var(--ease)}
+table.t{width:100%;border-collapse:collapse;font-size:.82rem}
+table.t th{font-weight:500;text-align:left;color:var(--tx3);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--glass-b)}
+table.t td{padding:10px;border-bottom:1px solid rgba(255,255,255,.05);vertical-align:middle}
+.table-wrap{overflow-x:auto}
+.avatar{flex:none;display:inline-grid;place-items:center;width:42px;height:42px;border-radius:50%;font:600 .86rem var(--serif);letter-spacing:.04em;color:var(--ivory);background:linear-gradient(145deg,hsl(var(--h) 22% 40%),hsl(var(--h) 18% 18%));border:1px solid rgba(231,224,210,.3)}
+.avatar.lg{width:72px;height:72px;font-size:1.4rem}.avatar.sm{width:30px;height:30px;font-size:.7rem}
+.avatars{display:flex}.avatars .avatar{margin-left:-8px;border-color:var(--bg2)}.avatars .avatar:first-child{margin-left:0}
+details.why{margin:8px 0;border:1px solid var(--glass-b);border-radius:8px;background:rgba(0,0,0,.18)}
+details.why summary{cursor:pointer;padding:8px 12px;font-size:.8rem;color:var(--gold);list-style:none}
+details.why summary::-webkit-details-marker{display:none}
+details.why summary::before{content:"+ ";}details.why[open] summary::before{content:"– "}
+details.why .body{padding:0 12px 12px;font-size:.8rem;color:var(--tx2)}
+details.why li{margin:3px 0 3px 16px}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:.8rem}.kv dt{color:var(--tx3)}.kv dd{margin:0}
+
+/* ---- Find Your Four pillars ---- */
+.pillar{position:relative;padding-top:20px;display:flex;flex-direction:column;gap:8px}
+.pillar::before{content:"";position:absolute;left:14px;right:14px;top:8px;height:5px;border-top:1px solid var(--gold);border-bottom:1px solid rgba(198,167,107,.4);opacity:.7}
+.stepper{display:flex;align-items:center;gap:6px;font-size:.7rem;color:var(--tx3);margin:4px 0}
+.stepper b{font-weight:500;padding:2px 8px;border-radius:20px;border:1px solid var(--glass-b)}
+.stepper b.on{color:var(--gold);border-color:var(--gold);background:rgba(198,167,107,.08)}
+.stepper b.bad{color:var(--bad);border-color:rgba(201,130,130,.5)}
+.cover{display:flex;gap:6px;flex-wrap:wrap}
+.cover .chip.hit{color:var(--ok);border-color:rgba(143,181,154,.5)}
+
+/* ---- messages ---- */
+.msg-layout{display:grid;grid-template-columns:290px minmax(0,1fr) 270px;gap:14px;height:calc(100vh - 170px);min-height:480px}
+.convo-col,.chat-col,.prof-col{min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.convo{display:flex;gap:10px;padding:11px 12px;border:0;background:none;width:100%;text-align:left;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05);transition:background .2s}
+.convo:hover{background:rgba(255,255,255,.05)}.convo.active{background:rgba(198,167,107,.09);box-shadow:inset 2px 0 var(--gold)}
+.convo .name{display:flex;justify-content:space-between;color:var(--tx);font-weight:500;font-size:.86rem}
+.convo .last{font-size:.76rem;color:var(--tx2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
+.unread{background:var(--gold);color:#17120a;font-size:.64rem;font-weight:700;min-width:17px;height:17px;border-radius:9px;display:inline-grid;place-items:center;padding:0 5px}
+.chat-scroll{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+.bubble{max-width:78%;padding:9px 13px;border-radius:12px;font-size:.86rem;line-height:1.45;animation:pop .3s var(--ease)}
+@keyframes pop{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:none}}
+.bubble.them{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid var(--glass-b);border-bottom-left-radius:3px}
+.bubble.me{align-self:flex-end;background:rgba(198,167,107,.15);border:1px solid rgba(198,167,107,.35);border-bottom-right-radius:3px;color:var(--ivory)}
+.bubble.sys{align-self:center;max-width:90%;font-size:.74rem;text-align:center;color:var(--tx3);background:none;border:1px dashed var(--glass-b)}
+.bubble time{display:block;font-size:.64rem;color:var(--tx3);margin-top:3px}
+.composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--glass-b)}
+.back-btn{display:none}
+
+/* ---- modal / menus / toasts ---- */
+#overlay-root{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:16px;pointer-events:none}
+#overlay-root:empty{display:none}
+#overlay-root .scrim{position:absolute;inset:0;background:rgba(5,6,8,.6);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;transition:opacity .3s}
+#overlay-root .modal{position:relative;width:min(520px,100%);max-height:90vh;overflow-y:auto;opacity:0;transform:translateY(10px) scale(.96);transition:opacity .3s var(--ease),transform .3s var(--ease)}
+#overlay-root .modal.wide{width:min(760px,100%)}
+#overlay-root.open{pointer-events:auto}#overlay-root.open .scrim{opacity:1}#overlay-root.open .modal{opacity:1;transform:none}
+.modal-h{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 6px}
+.modal-b{padding:8px 22px 20px}
+.modal-f{display:flex;justify-content:flex-end;gap:8px;padding:0 22px 20px;flex-wrap:wrap}
+#menu-root .glass-menu{position:fixed;z-index:90;min-width:210px;max-width:320px;animation:pop .22s var(--ease)}
+.menu-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;background:none;border-radius:6px;cursor:pointer;color:var(--tx);text-align:left;font-size:.84rem}
+.menu-item:hover{background:rgba(255,255,255,.08)}.menu-item.danger{color:var(--bad)}
+.menu-sep{height:1px;background:var(--glass-b);margin:5px 0}.menu-h{font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);padding:6px 10px 4px}
+#toast-root{position:fixed;right:20px;bottom:20px;z-index:200;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none}
+#toast-root .glass-toast{padding:10px 16px;font-size:.84rem;max-width:360px;pointer-events:auto;animation:toastin .4s var(--ease)}
+#toast-root .glass-toast.out{opacity:0;transform:translateX(20px);transition:all .3s}
+#toast-root .glass-toast.bad{border-left-color:var(--bad)}
+@keyframes toastin{from{opacity:0;transform:translateX(26px) scale(.96)}to{opacity:1;transform:none}}
+.skeleton{background:linear-gradient(90deg,rgba(255,255,255,.04),rgba(255,255,255,.1),rgba(255,255,255,.04));background-size:200% 100%;animation:shimmer 1.3s linear infinite;border-radius:8px}
+@keyframes shimmer{to{background-position:-200% 0}}
+.charts{display:flex;align-items:flex-end;gap:10px;height:140px;padding-top:10px}
+.charts .col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;height:100%;font-size:.7rem;color:var(--tx3)}
+.charts .col i{width:100%;max-width:38px;background:linear-gradient(180deg,var(--gold),var(--bronze));border-radius:4px 4px 0 0;transition:height .7s var(--ease)}
+.skip{position:absolute;left:-999px}.skip:focus{left:10px;top:10px;z-index:400;background:var(--bg2);padding:8px 12px;border:1px solid var(--gold);border-radius:6px}
+
+/* =====================================================================
+   9. RESPONSIVE BEHAVIOUR
+   ===================================================================== */
+@media (max-width:1180px){
+  .msg-layout{grid-template-columns:270px minmax(0,1fr)}.prof-col{display:none}
+  .split{grid-template-columns:1fr}
+}
+@media (max-width:900px){
+  #app{grid-template-columns:1fr}
+  #sidebar{position:fixed;left:0;top:0;width:min(290px,86vw);transform:translateX(-102%)}
+  .nav-open #sidebar{transform:none}
+  .side-collapsed .nav-text,.side-collapsed .brand-text,.side-collapsed .nav-label,.side-collapsed .count{display:revert}
+  .side-collapsed .nav-item{justify-content:flex-start;padding:9px 12px}.side-collapsed .side-foot{display:block}
+  .nav-open .scrim-nav{display:block;position:fixed;inset:0;z-index:25;background:rgba(5,6,8,.6)}
+  #nav-toggle{display:grid}#collapse-btn{display:none}
+  #topbar{padding:0 14px}#view{padding:20px 14px 70px}
+  h1{font-size:1.7rem}
+}
+@media (max-width:760px){
+  .msg-layout{grid-template-columns:1fr;height:calc(100vh - 150px)}
+  .msg-layout .chat-col{display:none}.msg-layout.chat-open .chat-col{display:flex}.msg-layout.chat-open .convo-col{display:none}
+  .back-btn{display:inline-flex}
+  .pill .lbl{display:none}
+}
+@media (max-width:520px){
+  .kv{grid-template-columns:1fr}.page-head{align-items:flex-start}
+  #toast-root{left:12px;right:12px;align-items:stretch}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  .fb-cube{animation:none}
+}
+</style>
+</head>
+
+<body>
+<!-- =====================================================================
+     1. HTML STRUCTURE
+     ===================================================================== -->
+<canvas id="bg" aria-hidden="true"></canvas>
+<div id="bg-fallback" aria-hidden="true"><div class="fb-cube"><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="fb-orb o1"></span><span class="fb-orb o2"></span><span class="fb-orb o3"></span></div>
+<div id="bg-veil" aria-hidden="true"></div>
+
+<div id="boot"><div class="boot-mark">N</div><div class="eyebrow">Nightclub</div><div class="spinner" role="status" aria-label="Loading"></div></div>
+<button class="skip" data-action="skip">Skip to content</button>
+
+<div id="app">
+  <aside id="sidebar" class="glass-side" aria-label="Primary">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">N</div>
+      <div class="brand-text"><div class="brand-name">NIGHTCLUB</div><div class="brand-sub">Founder Labs · Prototype</div></div>
+    </div>
+    <div class="meander" aria-hidden="true"></div>
+    <nav id="nav-primary" aria-label="Main"></nav>
+    <div class="nav-label">Account</div>
+    <nav id="nav-secondary" aria-label="Secondary"></nav>
+    <div class="side-foot">Simulated prototype.<br>All people, sessions and opportunities are local demo data.</div>
+  </aside>
+  <div class="scrim-nav" data-action="closeNav"></div>
+
+  <div id="main">
+    <header id="topbar" class="glass-nav">
+      <button id="nav-toggle" class="icon-btn" data-action="toggleNav" aria-label="Open navigation"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      <button id="collapse-btn" class="icon-btn" data-action="collapse" aria-label="Collapse sidebar" data-tip="Collapse sidebar"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h12M3 18h18"/></svg></button>
+      <div id="top-title">Home</div>
+      <div class="spacer"></div>
+      <button class="pill" data-action="about" aria-label="About this prototype"><span class="dot"></span><span class="lbl">Simulated · local demo data</span></button>
+      <button class="icon-btn" id="bell-btn" data-action="menu" data-menu="bell" aria-label="Notifications" data-tip="Notifications"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="badge-dot" id="bell-count" hidden></span></button>
+      <button class="icon-btn" data-action="safety" aria-label="Safety centre" data-tip="Safety centre"><svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></button>
+      <button class="icon-btn" id="user-btn" data-action="menu" data-menu="user" aria-label="Account menu"><span class="avatar sm" id="top-avatar" style="--h:38">DM</span></button>
+    </header>
+    <main id="view" tabindex="-1" aria-live="polite"></main>
+  </div>
+</div>
+
+<div id="overlay-root"></div>
+<div id="menu-root"></div>
+<div id="toast-root" role="status" aria-live="polite"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+/* =====================================================================
+   HELPERS
+   ===================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = p => p + Math.random().toString(36).slice(2, 8);
+const initials = n => String(n).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+const fmtDT = iso => { const d = new Date(iso); return d.toLocaleDateString(undefined, {weekday:'short', day:'numeric', month:'short'}) + ' · ' + d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'}); };
+const fmtD = iso => new Date(iso).toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'});
+const ago = ts => { const m = Math.round((Date.now() - ts) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + ' min ago'; const h = Math.round(m / 60); if (h < 24) return h + ' h ago'; return Math.round(h / 24) + ' d ago'; };
+const getPath = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+const setPath = (o, p, v) => { const k = p.split('.'); const last = k.pop(); const t = k.reduce((a, x) => a[x], o); t[last] = v; };
+const ICONS = {
+  home:'M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
+  four:'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M21 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8',
+  discover:'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.3-4.3',
+  circles:'M9 12a5 5 0 1 0 0-.01M15 12a5 5 0 1 0 0-.01',
+  missions:'M4 22V4M4 4h13l-2 4 2 4H4',
+  sessions:'M3 5h18v16H3zM3 10h18M8 3v4M16 3v4',
+  messages:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  opportunities:'M3 7h18v13H3zM8 7V4h8v3M3 13h18',
+  passport:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4',
+  membership:'M2 6h20v12H2zM2 10h20M6 15h4',
+  bell:'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+  settings:'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  admin:'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  profile:'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8'
+};
+const icon = n => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n] || ''}"/></svg>`;
+
+/* =====================================================================
+   6. DEMO DATA  (every person / session / opportunity below is fictional)
+   ===================================================================== */
+const GOAL_KEYS = ['startup_building', 'career_jobs', 'freelance_clients', 'learning_experiments'];
+const GOAL_LABEL = {startup_building:'Startup building', career_jobs:'Career & jobs', freelance_clients:'Freelance & clients', learning_experiments:'Learning & experiments'};
+const GOAL_PRESETS = {
+  Balanced:{startup_building:.25, career_jobs:.25, freelance_clients:.25, learning_experiments:.25},
+  'Startup-first':{startup_building:.55, career_jobs:.15, freelance_clients:.15, learning_experiments:.15},
+  'Career-first':{startup_building:.15, career_jobs:.55, freelance_clients:.15, learning_experiments:.15},
+  'Freelance-first':{startup_building:.15, career_jobs:.15, freelance_clients:.55, learning_experiments:.15}
+};
+// Skill → discipline category (used by the team optimizer for coverage & diversity)
+const SKILL_CAT = {React:'eng',TypeScript:'eng','Node.js':'eng',NestJS:'eng',FastAPI:'eng',Python:'eng',DevOps:'eng',Flutter:'eng',
+  'LLM Engineering':'ai',RAG:'ai','Vector Search':'ai','Data Analysis':'ai','UI Design':'design','Brand Design':'design','Motion Design':'design',
+  'Growth Marketing':'growth',Content:'growth',Community:'growth',Sales:'growth','Product Strategy':'strategy'};
+const ALL_SKILLS = Object.keys(SKILL_CAT);
+const CAT_LABEL = {eng:'Engineering', ai:'AI & data', design:'Design', growth:'Growth', strategy:'Strategy'};
+const gv = (a, b, c, d) => ({startup_building:a, career_jobs:b, freelance_clients:c, learning_experiments:d});
+
+const PEOPLE = [
+  {id:'p1', name:'Meera Iyer', role:'Product Designer', skills:['UI Design','Brand Design','Motion Design'], seeking:['React','Product Strategy'], avail:'mid', availLabel:'6–8 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.5,.2,.2,.1), interests:['Design systems','Creative tools','Education'], exp:2, hue:28, optInFour:true, capacity:true, visible:true,
+   bio:'Designs calm, legible interfaces for early products. Looking for an engineer to pair with on a first release.',
+   evidence:[{t:'Design system for a student fintech (Figma, reviewed by project lead)', level:'artifact'},{t:'Brand refresh for a community newsletter', level:'peer'},{t:'Motion studies — self-published', level:'self'}]},
+  {id:'p2', name:'Karthik Raman', role:'Backend Engineer', skills:['Node.js','NestJS','DevOps'], seeking:['UI Design','Growth Marketing'], avail:'high', availLabel:'10+ hrs/week', lang:['English','Telugu','Hindi'], tz:'IST (UTC+5:30)', goals:gv(.4,.3,.2,.1), interests:['Developer tools','Fintech','Open source'], exp:3, hue:210, optInFour:true, capacity:true, visible:true,
+   bio:'Ships APIs and deployment pipelines. Wants a designer and a growth partner for a developer-tool idea.',
+   evidence:[{t:'Open-source rate-limiter library (repository + CI history)', level:'artifact'},{t:'Led backend for a hackathon winner', level:'peer'}]},
+  {id:'p3', name:'Sana Fatima', role:'ML Engineer', skills:['Python','LLM Engineering','RAG'], seeking:['Flutter','Product Strategy'], avail:'mid', availLabel:'6–8 hrs/week', lang:['English','Hindi'], tz:'IST (UTC+5:30)', goals:gv(.35,.4,.1,.15), interests:['AI products','Education','Health'], exp:3, hue:160, optInFour:true, capacity:true, visible:true,
+   bio:'Builds retrieval and evaluation tooling. Seeks a mobile developer and someone to sharpen product direction.',
+   evidence:[{t:'Retrieval evaluation harness (public repo, reproducible run)', level:'artifact'},{t:'Workshop talk on prompt testing', level:'self'}]},
+  {id:'p4', name:'Rohit Naidu', role:'Growth Marketer', skills:['Growth Marketing','Content','Community'], seeking:['React','Data Analysis'], avail:'mid', availLabel:'5–6 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.45,.15,.3,.1), interests:['Creator economy','Education','Developer tools'], exp:2, hue:340, optInFour:true, capacity:true, visible:true,
+   bio:'Grows early communities and newsletters. Wants technical partners to turn audience insight into products.',
+   evidence:[{t:'Grew a learning newsletter to 4k readers (analytics export reviewed)', level:'artifact'},{t:'Community onboarding playbook', level:'peer'}]},
+  {id:'p5', name:'Anjali Menon', role:'Frontend Engineer', skills:['React','TypeScript','Flutter'], seeking:['Brand Design','DevOps'], avail:'mid', availLabel:'6–8 hrs/week', lang:['English'], tz:'IST (UTC+5:30)', goals:gv(.3,.45,.15,.1), interests:['Design systems','Accessibility','AI products'], exp:2, hue:95, optInFour:true, capacity:true, visible:true,
+   bio:'Accessible interfaces in React and Flutter.', evidence:[{t:'Component library with accessibility audit', level:'artifact'},{t:'Conference lightning talk', level:'self'}]},
+  {id:'p6', name:'Vikram Chowdary', role:'Founder / Operator', skills:['Product Strategy','Sales','Community'], seeking:['LLM Engineering','React'], avail:'low', availLabel:'3–4 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.6,.1,.2,.1), interests:['Education','Local-language AI','Marketplaces'], exp:3, hue:12, optInFour:true, capacity:true, visible:true,
+   bio:'Second-time founder looking for a technical co-builder for a local-language learning product.',
+   evidence:[{t:'Pilot with three schools (letters of intent)', level:'peer'},{t:'Previous startup exit story', level:'self'}]},
+  {id:'p7', name:'Divya Sharma', role:'Data Analyst', skills:['Data Analysis','Python','Vector Search'], seeking:['UI Design','Content'], avail:'mid', availLabel:'5–6 hrs/week', lang:['English','Hindi'], tz:'IST (UTC+5:30)', goals:gv(.2,.5,.2,.1), interests:['Health','Education','Open data'], exp:2, hue:260, optInFour:true, capacity:true, visible:true,
+   bio:'Turns messy datasets into dashboards and retrieval pipelines.', evidence:[{t:'Public health dashboard (data + notebook)', level:'artifact'}]},
+  {id:'p8', name:'Imran Shaikh', role:'Full-stack Developer', skills:['React','Node.js','FastAPI'], seeking:['Motion Design','Sales'], avail:'high', availLabel:'10+ hrs/week', lang:['English','Hindi'], tz:'IST (UTC+5:30)', goals:gv(.35,.25,.3,.1), interests:['Developer tools','Marketplaces'], exp:2, hue:190, optInFour:true, capacity:true, visible:true,
+   bio:'Ships end-to-end features quickly.', evidence:[{t:'Marketplace MVP (live demo reviewed)', level:'artifact'},{t:'Freelance client reference', level:'peer'}]},
+  {id:'p9', name:'Lakshmi Prasad', role:'Content Creator', skills:['Content','Community','Brand Design'], seeking:['React','LLM Engineering'], avail:'mid', availLabel:'5–6 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.3,.2,.4,.1), interests:['Creator economy','Education'], exp:2, hue:320, optInFour:false, capacity:true, visible:true,
+   bio:'Writes and teaches in Telugu and English. Not opted into Find Your Four, but open to direct requests.', evidence:[{t:'Tutorial series (published links)', level:'self'}]},
+  {id:'p10', name:'Tarun Kumar', role:'Platform Engineer', skills:['DevOps','Python','Node.js'], seeking:['Product Strategy'], avail:'low', availLabel:'At capacity right now', lang:['English'], tz:'IST (UTC+5:30)', goals:gv(.2,.6,.1,.1), interests:['Infrastructure','Open source'], exp:3, hue:60, optInFour:true, capacity:false, visible:true,
+   bio:'Currently at capacity; hidden from suggestions until availability opens.', evidence:[{t:'Infrastructure runbook set', level:'peer'}]},
+  {id:'p11', name:'Nisha Reddy', role:'Mobile Developer', skills:['Flutter','TypeScript','UI Design'], seeking:['Growth Marketing','RAG'], avail:'mid', availLabel:'6–8 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.4,.3,.2,.1), interests:['Health','AI products','Education'], exp:2, hue:120, optInFour:true, capacity:true, visible:true,
+   bio:'Builds polished Flutter apps and wants to explore retrieval features.', evidence:[{t:'Published Flutter app (store listing)', level:'artifact'},{t:'UI kit', level:'self'}]},
+  {id:'p12', name:'Arvind Rao', role:'Search Engineer', skills:['Vector Search','RAG','Python'], seeking:['Sales','Brand Design'], avail:'mid', availLabel:'6–8 hrs/week', lang:['English','Telugu'], tz:'IST (UTC+5:30)', goals:gv(.4,.35,.15,.1), interests:['AI products','Open source','Education'], exp:3, hue:240, optInFour:true, capacity:true, visible:true,
+   bio:'Hybrid search, reranking, and evaluation.', evidence:[{t:'Hybrid search benchmark write-up (code attached)', level:'artifact'},{t:'Mentoring notes', level:'self'}]}
+];
+const PROJECTS = [
+  {id:'j1', name:'Telugu Study Companion', owner:'p3', stage:'Prototype', desc:'A retrieval-based study assistant for school-level science in Telugu and English.', needs:['UI Design','Flutter'], tags:['RAG','Education','Telugu']},
+  {id:'j2', name:'Clinic Queue Notes', owner:'p7', stage:'Idea', desc:'Dashboards and reminders for small clinics, built on open health datasets.', needs:['React','Brand Design'], tags:['Health','Data']},
+  {id:'j3', name:'Release Radar', owner:'p2', stage:'Building', desc:'A developer tool that turns changelogs into plain-language upgrade notes.', needs:['UI Design','Growth Marketing'], tags:['Developer tools','Open source']},
+  {id:'j4', name:'Creator Ledger', owner:'p4', stage:'Idea', desc:'Simple income tracking for newsletter writers and teachers.', needs:['React','Node.js'], tags:['Creator economy','Fintech']},
+  {id:'j5', name:'Village Market Board', owner:'p6', stage:'Pilot planning', desc:'A lightweight marketplace for local produce with voice-first listings.', needs:['LLM Engineering','Flutter'], tags:['Marketplaces','Local-language AI']},
+  {id:'j6', name:'Accessible Components', owner:'p5', stage:'Building', desc:'Open component library with documented accessibility checks.', needs:['Brand Design','DevOps'], tags:['Accessibility','Design systems']}
+];
+const FEED = [
+  {id:'f1', by:'p3', title:'Evaluation harness v0.2 released', body:'Added a regression suite that compares retrieval quality across prompt revisions. Looking for feedback on the metrics.', tag:'Build update'},
+  {id:'f2', by:'p1', title:'Three navigation patterns, tested with five people', body:'A short write-up of what confused testers and what we changed. Notes and recordings attached.', tag:'Lesson'},
+  {id:'f3', by:'p12', title:'Hybrid search: when reranking is not worth it', body:'A benchmark across four corpora with code, so you can reproduce the numbers.', tag:'Technique'},
+  {id:'f4', by:'p4', title:'Seeking a technical partner for Creator Ledger', body:'Audience research is done; need someone to scope the first build with me.', tag:'Looking for collaborators'},
+  {id:'f5', by:'p11', title:'Flutter accessibility checklist', body:'What I check before every release, in the order I do it.', tag:'Technique'}
+];
+const SESSION_RES = [{title:'Starter repository (demo)', kind:'code'}, {title:'Session notes template (demo)', kind:'doc'}];
+const CANNED_REPLIES = ['Thanks for the message. I can look at this tomorrow evening.', 'That sounds like a useful first milestone — can we scope it to one deliverable?', 'I have about six hours this week. Want to pick one task and start there?', 'Happy to review. Could you share the link when it is ready?'];
+
+function defaultState() {
+  const day = (n, h = 19) => { const t = new Date(); t.setDate(t.getDate() + n); t.setHours(h, 0, 0, 0); return t.toISOString(); };
+  const now = Date.now();
+  return {
+    v:1, view:'home', viewId:null, sidebarCollapsed:false, role:'member', seenIntro:false,
+    me:{name:'Demo Member', headline:'Full-stack builder exploring AI products', role:'Full-stack Developer',
+      bio:'Builds web products end to end and wants a designer and a growth partner for the next experiment.',
+      skills:['React','TypeScript','Node.js','Python','LLM Engineering'], seeking:['UI Design','Brand Design','Growth Marketing','Product Strategy'],
+      suggested:['RAG','Vector Search'], interests:['Developer tools','Education','AI products'],
+      avail:'mid', days:['Mon','Wed','Sat'], language:'English', matchLang:['English','Telugu'], tz:'IST (UTC+05:30)', exp:2,
+      goals:{startup_building:.45, career_jobs:.30, freelance_clients:.15, learning_experiments:.10}, accountPaused:false},
+    privacy:{visibleInSearch:true, allowIntros:true, showAvailability:true, showEvidence:true, pauseMatching:false},
+    four:{optIn:false, slots:[], excluded:[], circleId:null, waitlist:false},
+    blocked:[], saved:[], savedSearches:[], contribRequests:{}, feedSaved:[],
+    connections:{p5:true, p8:true, p7:true},
+    incoming:['p9'],
+    disc:{tab:'people', q:'', lang:'any', avail:'any', goal:'any', skill:'any', sort:'relevance'},
+    circles:[
+      {id:'c1', name:'Retrieval Lab Circle', status:'Active', missionId:'m1',
+       members:[{id:'me', role:'Lead engineer'}, {id:'p5', role:'Frontend'}, {id:'p8', role:'API & integration'}, {id:'p7', role:'Data & evaluation'}],
+       goals:['Ship a working study-assistant demo', 'Collect feedback from five real learners'],
+       agreement:{cadence:'Tue & Sat check-in', norms:'Written updates first; calls only when blocked.', confirmed:true},
+       posts:[{id:'d1', by:'p5', text:'Component skeleton is ready. I can wire the chat panel once the API contract is agreed.', t:now - 86400000}, {id:'d2', by:'p7', text:'Uploaded a first evaluation set — twelve questions with source passages.', t:now - 36000000}]},
+      {id:'c2', name:'Portfolio Polish Circle', status:'Forming', missionId:'m2',
+       members:[{id:'me', role:'Engineer'}, {id:'p5', role:'Accessibility review'}],
+       goals:['Redesign the public project pages'], agreement:{cadence:'Weekly', norms:'', confirmed:false}, posts:[]}
+    ],
+    missions:[
+      {id:'m1', circleId:'c1', title:'Retrieval-based study assistant (demo mission)', summary:'Build and demo a small study assistant that answers from provided notes, with source passages shown.',
+       tasks:[{id:'t1', title:'Agree API contract for /ask endpoint', owner:'p8', status:'done'}, {id:'t2', title:'Chat panel with source citations', owner:'p5', status:'doing'}, {id:'t3', title:'Chunking + embedding pipeline', owner:'me', status:'doing'}, {id:'t4', title:'Evaluation set of 12 questions', owner:'p7', status:'done'}, {id:'t5', title:'Deploy demo for testers', owner:'', status:'todo'}],
+       deliverables:[{id:'dl1', title:'Working demo link', owner:'me', done:false}, {id:'dl2', title:'Evaluation report', owner:'p7', done:true}],
+       milestones:[{id:'ms1', title:'API contract agreed', date:day(-6), done:true}, {id:'ms2', title:'First end-to-end answer', date:day(2), done:false}, {id:'ms3', title:'Tester demo', date:day(9), done:false}],
+       artifacts:[{id:'a1', name:'evaluation-set-v1.csv', kind:'file', by:'p7', note:'12 questions with sources', t:now - 90000000}],
+       reviews:[]},
+      {id:'m2', circleId:'c2', title:'Portfolio page redesign (demo mission)', summary:'Restructure project pages so evidence and roles are clear.',
+       tasks:[{id:'t6', title:'Audit current pages for accessibility', owner:'p5', status:'doing'}, {id:'t7', title:'Draft new page structure', owner:'me', status:'todo'}],
+       deliverables:[{id:'dl3', title:'New page template', owner:'me', done:false}],
+       milestones:[{id:'ms4', title:'Structure approved', date:day(-2), done:false}], artifacts:[], reviews:[]}
+    ],
+    sessions:[
+      {id:'s1', title:'Ship a retrieval demo in 90 minutes', host:'Founder Labs (demo host)', date:day(2), mins:90, desc:'A guided build: chunk, embed, retrieve, and show sources.', rsvp:false, attended:null, experiments:[{id:'x1', title:'Add a citation panel to your demo', claimed:false, demo:''}]},
+      {id:'s2', title:'Design critique lab', host:'Founder Labs (demo host)', date:day(6), mins:75, desc:'Bring one screen; leave with three concrete changes.', rsvp:false, attended:null, experiments:[{id:'x2', title:'Redo one flow with fewer steps', claimed:false, demo:''}]},
+      {id:'s3', title:'From prototype to first users', host:'Founder Labs (demo host)', date:day(11), mins:90, desc:'Finding five testers and what to ask them.', rsvp:false, attended:null, experiments:[{id:'x3', title:'Recruit two testers and log findings', claimed:false, demo:''}]},
+      {id:'s4', title:'Agents that survive production', host:'Founder Labs (demo host)', date:day(-5), mins:90, desc:'Error budgets, retries and observability for agent workflows.', rsvp:true, attended:null, experiments:[{id:'x4', title:'Add retry + logging to a tool call', claimed:false, demo:''}]},
+      {id:'s5', title:'Vector search clinic', host:'Founder Labs (demo host)', date:day(-12), mins:75, desc:'Hybrid search, reranking, and measuring quality.', rsvp:true, attended:'attended', experiments:[{id:'x5', title:'Compare BM25 vs dense on your data', claimed:true, demo:'Dense won on paraphrases, BM25 on exact IDs; using both.'}]}
+    ],
+    convos:[
+      {id:'cv1', with:'p5', unread:2, muted:false, msgs:[{from:'sys', text:'Connection accepted. Messaging is in-app only; contact details stay hidden.', t:now - 8*86400000}, {from:'me', text:'Do you want to take the chat panel while I do the pipeline?', t:now - 2*86400000}, {from:'them', text:'Yes — I can start on it tonight.', t:now - 3600000*5}, {from:'them', text:'Can you share the response shape for citations?', t:now - 3600000*4}]},
+      {id:'cv2', with:'p8', unread:0, muted:false, msgs:[{from:'sys', text:'Connection accepted. Messaging is in-app only; contact details stay hidden.', t:now - 9*86400000}, {from:'them', text:'API contract is merged. Please review when you can.', t:now - 86400000*1.5}]},
+      {id:'cv3', with:'p7', unread:0, muted:false, msgs:[{from:'sys', text:'Connection accepted. Messaging is in-app only; contact details stay hidden.', t:now - 7*86400000}, {from:'them', text:'Evaluation set uploaded to the mission.', t:now - 36000000}]}
+    ],
+    msg:{active:'cv1', q:'', chatOpen:false},
+    opps:[
+      {id:'o1', type:'startup', goal:'startup_building', title:'Cofounder search: AI tutoring for Telugu learners', org:'Demo Startup A', verified:true, needs:['LLM Engineering','Product Strategy'], desc:'Early-stage team seeking a technical cofounder. Equity-based; no salary yet. This is an introduction, not an offer.', status:'none'},
+      {id:'o2', type:'job', goal:'career_jobs', title:'Junior AI Engineer — retrieval systems', org:'Demo Company B', verified:true, needs:['Python','LLM Engineering'], desc:'Entry-level role on a search team. The poster reviews applications independently of Nightclub.', status:'none'},
+      {id:'o3', type:'freelance', goal:'freelance_clients', title:'Landing page + chat widget build', org:'Demo Client C', verified:true, needs:['React','TypeScript'], desc:'Two-week fixed-scope project, paid on delivery of agreed milestones.', status:'none'},
+      {id:'o4', type:'customer', goal:'startup_building', title:'Pilot customer: clinic scheduling assistant', org:'Demo Clinic Group D', verified:true, needs:['Node.js','Product Strategy'], desc:'A small clinic group is willing to trial a scheduling assistant for six weeks.', status:'none'},
+      {id:'o5', type:'job', goal:'career_jobs', title:'Frontend Engineer (React / TypeScript)', org:'Demo Company E', verified:true, needs:['React','TypeScript','UI Design'], desc:'Product team role; hiring decisions are made by the employer alone.', status:'none'},
+      {id:'o6', type:'freelance', goal:'freelance_clients', title:'Prompt evaluation for a support bot', org:'Demo Client F', verified:true, needs:['LLM Engineering','Data Analysis'], desc:'Short contract to build an evaluation set and report on failure modes.', status:'none'},
+      {id:'o7', type:'startup', goal:'startup_building', title:'Founding engineer — developer tooling', org:'Demo Startup G', verified:true, needs:['TypeScript','DevOps','Node.js'], desc:'Pre-seed team. Terms are negotiated directly; Nightclub does not guarantee any outcome.', status:'none'},
+      {id:'o8', type:'customer', goal:'startup_building', title:'Newsletter wants an AI summarizer pilot', org:'Demo Publisher H', verified:true, needs:['Python','Content'], desc:'A 4k-reader newsletter will trial a weekly summarizer and give structured feedback.', status:'none'}
+    ],
+    oppFilter:{type:'all', matchGoals:true},
+    passport:{
+      contribs:[
+        {id:'k1', title:'Retrieval pipeline (chunking + embeddings)', project:'Retrieval Lab', role:'Lead engineer', level:'artifact', evidence:'Repository link + CI run (demo)', date:day(-4), ackRequested:false},
+        {id:'k2', title:'API contract review', project:'Retrieval Lab', role:'Reviewer', level:'peer', evidence:'Review thread acknowledged by Imran S.', date:day(-6), ackRequested:false},
+        {id:'k3', title:'Personal portfolio site', project:'Self-directed', role:'Designer + developer', level:'self', evidence:'', date:day(-40), ackRequested:false}
+      ],
+      acks:[{id:'ak1', from:'p8', text:'Reviewed the API contract carefully and caught two edge cases before we merged.', t:now - 6*86400000}, {id:'ak2', from:'p7', text:'Responsive and clear in written updates.', t:now - 3*86400000}],
+      achievements:['Completed one Build Mission milestone', 'Attended two live sessions', 'Published one project story']
+    },
+    membership:{plan:'Nightclub Monthly', status:'active', autoRenew:true, renewsOn:day(18, 9), payment:'Card ending •• 42 (demo — no real payment data)', history:[{id:'b1', date:day(-12, 9), amount:1, note:'Monthly membership'}, {id:'b2', date:day(-42, 9), amount:1, note:'Monthly membership'}, {id:'b3', date:day(-72, 9), amount:1, note:'Monthly membership'}]},
+    config:{includedSessions:8, price:499, currency:'₹'},
+    notifs:[
+      {id:'n1', cat:'connections', title:'Lakshmi P. asked to connect', body:'Lakshmi shares your interest in creator education. Accepting enables in-app chat only.', t:now - 3600000*2, read:false, link:{view:'notifications'}, kind:'request', pid:'p9'},
+      {id:'n2', cat:'messages', title:'Anjali M. sent 2 messages', body:'“Can you share the response shape for citations?”', t:now - 3600000*4, read:false, link:{view:'messages', id:'cv1'}},
+      {id:'n3', cat:'missions', title:'Review requested on “Evaluation set”', body:'Divya marked a task done and asked for a quick review.', t:now - 3600000*20, read:false, link:{view:'missions', id:'m1'}},
+      {id:'n4', cat:'sessions', title:'Session reminder: Ship a retrieval demo', body:'You opted into reminders for this session.', t:now - 3600000*26, read:true, link:{view:'sessions'}},
+      {id:'n5', cat:'opportunities', title:'New opportunity matches your goals', body:'“Prompt evaluation for a support bot” matches two of your skills.', t:now - 86400000*2, read:true, link:{view:'opportunities'}},
+      {id:'n6', cat:'missions', title:'Milestone complete: API contract agreed', body:'Recorded in your Builder Passport as self-reported until peers acknowledge.', t:now - 86400000*6, read:true, link:{view:'passport'}}
+    ],
+    notifPrefs:{connections:true, messages:true, missions:true, sessions:true, opportunities:true, digest:true, push:false, quietStart:'22:00', quietEnd:'07:00'},
+    settingsTab:'profile', missionTab:'tasks', sessionTab:'upcoming', adminTab:'overview', notifFilter:'all', discSaved:[],
+    adminState:{memberStatus:{}, deletion:null},
+    reportsQueue:[
+      {id:'r1', type:'message', subject:'Unsolicited promotional message', reason:'Spam', status:'open', reporter:'Member (demo)', t:now - 86400000*2},
+      {id:'r2', type:'profile', subject:'Profile lists contact details in bio', reason:'Privacy', status:'open', reporter:'Member (demo)', t:now - 86400000},
+      {id:'r3', type:'opportunity', subject:'Listing promises guaranteed income', reason:'Misleading claim', status:'open', reporter:'Moderator scan (demo)', t:now - 3600000*30}
+    ],
+    adminOpps:[
+      {id:'q1', type:'freelance', goal:'freelance_clients', title:'Design handoff to React components', org:'Demo Studio I', verified:false, needs:['React','UI Design'], desc:'Short contract. Awaiting legitimacy verification.', status:'none', review:'pending'},
+      {id:'q2', type:'job', goal:'career_jobs', title:'Data analyst — public health team', org:'Demo Institute J', verified:false, needs:['Data Analysis','Python'], desc:'Posting submitted by employer representative; awaiting verification.', status:'none', review:'pending'}
+    ]
+  };
+}
+
+/* =====================================================================
+   8. LOCALSTORAGE PERSISTENCE
+   ===================================================================== */
+const STORE_KEY = 'nightclub.prototype.v1';
+let state;
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) { const s = JSON.parse(raw); if (s && s.v === 1) return Object.assign(defaultState(), s); }
+  } catch (e) { /* storage unavailable or corrupted: fall back to defaults */ }
+  return defaultState();
+}
+let saveTimer = 0;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* quota/private mode: ignore */ } }, 60);
+}
+function saveNow() { clearTimeout(saveTimer); try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+
+/* transient (non-persisted) UI state */
+const ui = {loading:null, sentTimes:[], lastFocus:null, reduced:false};
+
+/* =====================================================================
+   MATCHING (blueprint §4–5; weights are test hypotheses, not learned truth)
+   ===================================================================== */
+const person = id => id === 'me' ? {id:'me', name:state.me.name, role:state.me.role, hue:38, skills:state.me.skills, seeking:state.me.seeking, avail:state.me.avail, goals:state.me.goals, interests:state.me.interests, exp:state.me.exp, bio:state.me.bio, evidence:[]} : PEOPLE.find(p => p.id === id);
+const cover = (needs, offers) => needs.length ? needs.filter(n => offers.includes(n)).length / needs.length : .5;
+const smooth = x => .1 + .9 * x;
+const AV = {low:1, mid:2, high:3};
+function pairParts(a, b) {
+  const aNeeds = cover(a.seeking, b.skills), bNeeds = cover(b.seeking, a.skills);
+  const complementarity = Math.sqrt(smooth(aNeeds) * smooth(bNeeds));           // geometric mean penalises one-sided fit
+  const goalAlign = 1 - .5 * GOAL_KEYS.reduce((s, k) => s + Math.abs((a.goals[k] || 0) - (b.goals[k] || 0)), 0);
+  const inter = a.interests.filter(i => b.interests.includes(i)).length, uni = new Set([...a.interests, ...b.interests]).size || 1;
+  const mutualInterest = smooth(inter / uni);
+  const availability = 1 - Math.abs(AV[a.avail] - AV[b.avail]) / 2;
+  const experienceFit = 1 - Math.abs((a.exp || 2) - (b.exp || 2)) / 2;
+  const overlap = a.skills.filter(s => b.skills.includes(s)).length, su = new Set([...a.skills, ...b.skills]).size || 1;
+  const novelty = 1 - overlap / su;
+  return {aNeeds, bNeeds, complementarity, goalAlign, mutualInterest, availability, experienceFit, novelty};
+}
+function pairScore(a, b) {
+  const p = pairParts(a, b);
+  return .30 * p.complementarity + .25 * p.goalAlign + .15 * p.mutualInterest + .15 * p.availability + .10 * p.experienceFit + .05 * p.novelty;
+}
+// Descriptive tier only — never a probability of friendship, success or employment
+const tier = s => s >= .66 ? 'Strong complement' : s >= .52 ? 'Good complement' : 'Worth exploring';
+function topSharedGoal(a, b) { return GOAL_KEYS.slice().sort((x, y) => Math.min(b.goals[y], a.goals[y]) - Math.min(b.goals[x], a.goals[x]))[0]; }
+function explain(p) {
+  const me = person('me'), reasons = [], limits = [];
+  const theyCover = me.seeking.filter(s => p.skills.includes(s)), iCover = p.seeking.filter(s => me.skills.includes(s));
+  if (theyCover.length) reasons.push(`They offer ${theyCover.join(', ')} — skills you said you are looking for.`);
+  if (iCover.length) reasons.push(`You offer ${iCover.join(', ')} — skills they said they are looking for.`);
+  const g = topSharedGoal(me, p); reasons.push(`Shared goal emphasis: ${GOAL_LABEL[g].toLowerCase()} (you ${Math.round(me.goals[g] * 100)}%, them ${Math.round(p.goals[g] * 100)}%).`);
+  const si = me.interests.filter(i => p.interests.includes(i)); if (si.length) reasons.push(`Common interests: ${si.join(', ')}.`);
+  reasons.push(`Availability: ${p.availLabel} (yours: ${AVAIL_LABEL[me.avail]}).`);
+  const art = p.evidence.filter(e => e.level === 'artifact').length;
+  if (art) reasons.push(`Portfolio evidence: ${art} artifact-verified item${art > 1 ? 's' : ''}.`);
+  if (!theyCover.length) limits.push('They do not offer a skill you listed as sought.');
+  if (!iCover.length) limits.push('Little of what you offer is on their wish list, so the benefit may be one-sided.');
+  if (!art) limits.push('Little verified evidence yet — missing evidence is not a sign of weak ability.');
+  if (p.avail === 'low') limits.push('Limited availability; expect slower replies.');
+  limits.push('This is a ranking aid. It does not predict friendship, success or employment.');
+  return {reasons, limits, theyCover, iCover};
+}
+const AVAIL_LABEL = {low:'3–4 hrs/week', mid:'6–8 hrs/week', high:'10+ hrs/week'};
+function contribution(p) {
+  const me = person('me'); const c = me.seeking.filter(s => p.skills.includes(s));
+  if (c.length) return `Could lead ${c.slice(0, 2).join(' and ')} for the shared build.`;
+  return `Could bring ${p.skills[0]} experience and a fresh perspective.`;
+}
+function eligiblePool() {
+  if (state.privacy.pauseMatching) return [];
+  return PEOPLE.filter(p => p.optInFour && p.capacity && p.visible && !state.blocked.includes(p.id) && !state.connections[p.id] && !state.four.excluded.includes(p.id));
+}
+function teamScore(ids) {
+  const me = person('me'), team = ids.map(person);
+  const union = new Set(team.flatMap(p => p.skills));
+  const needCov = cover(me.seeking, [...union]);
+  const cats = new Set([...union].map(s => SKILL_CAT[s]));
+  const skillCoverage = .7 * needCov + .3 * (cats.size / 5);
+  const collabFit = team.reduce((s, p) => s + pairScore(me, p), 0) / (team.length || 1);
+  const reciprocal = team.reduce((s, p) => { const x = pairParts(me, p); return s + Math.sqrt(smooth(x.aNeeds) * smooth(x.bNeeds)); }, 0) / (team.length || 1);
+  const roles = new Set(team.map(p => p.role)); const diversity = roles.size / (team.length || 1);
+  return .40 * skillCoverage + .25 * collabFit + .20 * reciprocal + .15 * diversity;
+}
+// Greedy marginal-gain selection followed by one pass of swap local search (blueprint V1)
+function selectFour(fixed = [], n = 4) {
+  const pool = eligiblePool().filter(p => !fixed.includes(p.id));
+  const chosen = fixed.slice();
+  while (chosen.length < n) {
+    let best = null, bs = -1;
+    for (const p of pool) { if (chosen.includes(p.id)) continue; const s = teamScore([...chosen, p.id]); if (s > bs) { bs = s; best = p; } }
+    if (!best) break; chosen.push(best.id);
+  }
+  for (let i = fixed.length; i < chosen.length; i++) {
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (const p of pool) {
+        if (chosen.includes(p.id)) continue;
+        const trial = chosen.slice(); trial[i] = p.id;
+        if (teamScore(trial) > teamScore(chosen) + 1e-9) { chosen[i] = p.id; improved = true; }
+      }
+    }
+  }
+  return chosen;
+}
+function oppFit(o) {
+  const me = state.me, maxW = Math.max(...GOAL_KEYS.map(k => me.goals[k]));
+  const have = o.needs.filter(n => me.skills.includes(n)), miss = o.needs.filter(n => !me.skills.includes(n));
+  const score = .6 * (have.length / o.needs.length) + .4 * (me.goals[o.goal] / maxW);
+  const label = score >= .7 ? 'Strong fit' : score >= .5 ? 'Good fit' : 'Partial fit';
+  return {score, label, have, miss};
+}
+function profileComplete() {
+  const m = state.me, missing = [];
+  if (!m.name.trim()) missing.push('name'); if (!m.role.trim()) missing.push('current role');
+  if (!m.skills.length) missing.push('at least one skill you offer'); if (!m.seeking.length) missing.push('at least one skill you seek');
+  if (!m.avail) missing.push('availability'); if (!m.matchLang.length) missing.push('language');
+  return {ok:!missing.length, missing};
+}
+const sumGoals = g => GOAL_KEYS.reduce((s, k) => s + g[k], 0);
+function setGoalPct(key, pct) {
+  const g = state.me.goals, others = GOAL_KEYS.filter(k => k !== key), rest = 100 - pct;
+  const sumO = others.reduce((a, k) => a + g[k], 0);
+  const raw = others.map(k => sumO > 0 ? g[k] / sumO * rest : rest / others.length);
+  const fl = raw.map(Math.floor); let rem = rest - fl.reduce((a, b) => a + b, 0);
+  raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (rem > 0) { fl[i]++; rem--; } });
+  others.forEach((k, i) => g[k] = fl[i] / 100); g[key] = pct / 100;
+}
+
+/* =====================================================================
+   UI PRIMITIVES: toasts, modals, menus
+   ===================================================================== */
+function toast(msg, kind = '') {
+  const el = document.createElement('div'); el.className = 'glass-toast ' + kind; el.textContent = msg;
+  $('#toast-root').appendChild(el);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 320); }, 3400);
+  while ($('#toast-root').children.length > 4) $('#toast-root').firstChild.remove();
+}
+function openModal(html, wide = false, label = 'Dialog') {
+  const root = $('#overlay-root'); ui.lastFocus = document.activeElement; closeMenus();
+  root.innerHTML = `<div class="scrim" data-action="closeModal"></div><div class="modal glass-modal ${wide ? 'wide' : ''}" role="dialog" aria-modal="true" aria-label="${esc(label)}">${html}</div>`;
+  requestAnimationFrame(() => { root.classList.add('open'); const f = $('.modal [autofocus], .modal input:not([type=hidden]), .modal textarea, .modal select, .modal .btn', root); if (f) f.focus({preventScroll:true}); });
+}
+function closeModal() {
+  const root = $('#overlay-root'); root.classList.remove('open');
+  setTimeout(() => { if (!root.classList.contains('open')) root.innerHTML = ''; }, 260);
+  if (ui.lastFocus && ui.lastFocus.focus) try { ui.lastFocus.focus({preventScroll:true}); } catch (e) {}
+}
+const modalHtml = (title, body, foot = '') => `<div class="modal-h"><h2>${esc(title)}</h2><button class="icon-btn" data-action="closeModal" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div><div class="modal-b">${body}</div>${foot ? `<div class="modal-f">${foot}</div>` : ''}`;
+function closeMenus() { $('#menu-root').innerHTML = ''; }
+function openMenu(anchor, html) {
+  const root = $('#menu-root'); root.innerHTML = `<div class="glass-menu" role="menu">${html}</div>`;
+  const m = root.firstChild, r = anchor.getBoundingClientRect();
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px';
+  m.style.top = Math.min(innerHeight - h - 8, r.bottom + 8) + 'px';
+}
+const mi = (label, action, attrs = '', cls = '') => `<button class="menu-item ${cls}" role="menuitem" data-action="${action}" ${attrs}>${label}</button>`;
+
+/* =====================================================================
+   SMALL COMPONENTS
+   ===================================================================== */
+const avatar = (p, cls = '') => `<span class="avatar ${cls}" style="--h:${p.hue}" aria-hidden="true">${esc(initials(p.name))}</span>`;
+const badge = (t, c = '') => `<span class="badge ${c}">${t}</span>`;
+const lvl = l => ({self:badge('Self-reported', 'b-self'), peer:badge('Peer-acknowledged', 'b-peer'), artifact:badge('Artifact-verified', 'b-art')})[l];
+const chips = (arr, cls = '') => arr.map(s => `<span class="chip ${cls}">${esc(s)}</span>`).join('');
+const btn = (label, action, attrs = '', cls = '') => `<button class="btn ${cls}" data-action="${action}" ${attrs}>${label}</button>`;
+const head = (title, sub, right = '') => `<div class="page-head"><div><div class="eyebrow">Nightclub</div><h1>${title}</h1>${sub ? `<p>${sub}</p>` : ''}</div><div class="row">${right}</div></div>`;
+const demoBanner = t => `<div class="demo-banner">◆ ${t}</div>`;
+const sw = (path, checked, rerender = '', disabled = false) => `<label class="switch"><input type="checkbox" data-bind="${path}" ${rerender ? 'data-rerender="1"' : ''} ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span></span></label>`;
+const bar = (done, total) => `<div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}"><i style="width:${total ? Math.round(done / total * 100) : 0}%"></i></div>`;
+function unreadMsgs() { return state.convos.reduce((s, c) => s + c.unread, 0); }
+function unreadNotifs() { return state.notifs.filter(n => !n.read).length; }
+function notify(cat, title, body, link, extra = {}) {
+  if (cat !== 'safety' && state.notifPrefs[cat] === false) return;
+  state.notifs.unshift(Object.assign({id:uid('n'), cat, title, body, t:Date.now(), read:false, link:link || {view:'notifications'}}, extra));
+}
+function upcoming() { return state.sessions.filter(s => new Date(s.date) >= new Date(new Date().setHours(0, 0, 0, 0))).sort((a, b) => new Date(a.date) - new Date(b.date)); }
+function past() { return state.sessions.filter(s => !upcoming().includes(s)).sort((a, b) => new Date(b.date) - new Date(a.date)); }
+function sessionsUsed() {
+  const n = new Date(); return state.sessions.filter(s => { const d = new Date(s.date); return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear(); });
+}
+const missionProgress = m => ({done:m.tasks.filter(t => t.status === 'done').length, total:m.tasks.length, msDone:m.milestones.filter(x => x.done).length, msTotal:m.milestones.length});
+const circleOf = id => state.circles.find(c => c.id === id);
+const missionOf = id => state.missions.find(m => m.id === id);
+function ownerName(id) { return id ? (id === 'me' ? 'You' : person(id).name) : 'Unassigned'; }
+function ownerOptions(circle, sel) {
+  const ids = circle ? circle.members.map(m => m.id) : ['me'];
+  return `<option value="" ${!sel ? 'selected' : ''}>Unassigned</option>` + ids.map(id => `<option value="${id}" ${sel === id ? 'selected' : ''}>${esc(ownerName(id))}</option>`).join('');
+}
+
+/* =====================================================================
+   5. MODULE RENDERING
+   ===================================================================== */
+
+/* ---------- HOME ---------- */
+function nextAction() {
+  const inc = state.incoming.filter(id => !state.blocked.includes(id));
+  if (inc.length) return {title:`Respond to ${person(inc[0]).name}'s connection request`, desc:'Accepting opens in-app chat only. Your contact details stay hidden.', cta:'Review request', action:'go', attrs:'data-view="notifications"'};
+  const un = state.convos.find(c => c.unread > 0);
+  if (un) return {title:`Reply to ${person(un.with).name}`, desc:`${un.unread} unread message${un.unread > 1 ? 's' : ''} in a conversation about your shared build.`, cta:'Open conversation', action:'go', attrs:`data-view="messages" data-id="${un.id}"`};
+  const rv = state.missions.flatMap(m => m.tasks.filter(t => t.status === 'review' && t.owner !== 'me').map(t => ({m, t}))).find(Boolean);
+  if (rv) return {title:`Review “${rv.t.title}”`, desc:'A teammate asked for a review on this task.', cta:'Open mission', action:'go', attrs:`data-view="missions" data-id="${rv.m.id}"`};
+  const ss = upcoming().find(s => s.rsvp);
+  if (ss) return {title:`Join “${ss.title}”`, desc:`${fmtDT(ss.date)} — you reserved a seat.`, cta:'Session details', action:'session', attrs:`data-id="${ss.id}"`};
+  if (!state.four.optIn) return {title:'Try Find Your Four', desc:'Four complementary, opt-in introductions with the reason for each. You decide who to contact.', cta:'See how it works', action:'go', attrs:'data-view="four"'};
+  const t = state.missions.flatMap(m => m.tasks.filter(t => !t.owner).map(t => ({m, t}))).find(Boolean);
+  if (t) return {title:`Claim “${t.t.title}”`, desc:'One unassigned task in your active mission.', cta:'Open mission', action:'go', attrs:`data-view="missions" data-id="${t.m.id}"`};
+  return {title:'You are all caught up', desc:'Nothing needs your attention right now. Nightclub will not invent reasons to return.', cta:'Browse Discover', action:'go', attrs:'data-view="discover"'};
+}
+function viewHome() {
+  const me = state.me, first = me.name.split(' ')[0], h = new Date().getHours();
+  const greet = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  const topGoal = GOAL_KEYS.slice().sort((a, b) => me.goals[b] - me.goals[a])[0];
+  const na = nextAction();
+  const four = state.four, activeM = state.missions.find(m => { const p = missionProgress(m); return p.done < p.total; }) || state.missions[0];
+  const ap = activeM ? missionProgress(activeM) : null;
+  const myTask = activeM && (activeM.tasks.find(t => t.owner === 'me' && t.status !== 'done') || activeM.tasks.find(t => !t.owner));
+  const opp = state.opps.slice().sort((a, b) => oppFit(b).score - oppFit(a).score)[0];
+  const ses = upcoming().find(s => s.rsvp) || upcoming()[0];
+  const fourPreview = !four.optIn
+    ? `<p>Find Your Four is off. It is opt-in: nobody is matched or contacted unless you turn it on.</p><div class="row" style="margin-top:12px">${btn('Learn more', 'go', 'data-view="four"')}</div>`
+    : `<div class="row">${four.slots.length ? `<div class="avatars">${four.slots.map(s => avatar(person(s.id), 'sm')).join('')}</div><span class="tiny">${four.slots.filter(s => s.status === 'accepted').length} accepted · ${four.slots.filter(s => s.status === 'requested').length} requested</span>` : '<span class="tiny">No suggestions yet</span>'}</div><div class="row" style="margin-top:12px">${btn('Open Find Your Four', 'go', 'data-view="four"')}</div>`;
+  return `
+  ${head(`${greet}, ${esc(first)}`, 'One next step, a few honest summaries, and a feed that ends.')}
+  <div class="split">
+    <section class="glass-panel pad">
+      <div class="eyebrow">Builder Persona</div>
+      <h2 style="margin:6px 0 4px">${esc(me.role)}</h2>
+      <p>${esc(me.headline)}</p>
+      <hr class="rule">
+      <dl class="kv">
+        <dt>Offers</dt><dd>${chips(me.skills.slice(0, 5))}</dd>
+        <dt>Seeking</dt><dd>${chips(me.seeking.slice(0, 5))}</dd>
+        <dt>Leaning</dt><dd>${esc(GOAL_LABEL[topGoal])} · ${Math.round(me.goals[topGoal] * 100)}% <span class="tiny">(you can change this any time in Settings)</span></dd>
+        <dt>Availability</dt><dd>${AVAIL_LABEL[me.avail]} · ${esc(me.days.join(', ') || 'no days set')}</dd>
+      </dl>
+      <div class="row" style="margin-top:14px">${btn('Edit persona', 'go', 'data-view="settings"')}${btn('Builder Passport', 'go', 'data-view="passport"')}</div>
+    </section>
+    <section class="glass-panel pad" style="border-color:rgba(198,167,107,.4)">
+      <div class="eyebrow">One next meaningful action</div>
+      <h2 style="margin:8px 0">${esc(na.title)}</h2><p>${esc(na.desc)}</p>
+      <div style="margin-top:16px">${btn(esc(na.cta), na.action, na.attrs, 'primary')}</div>
+    </section>
+  </div>
+  <div class="sec-title"><h2>Today in your workspace</h2></div>
+  <div class="grid g3">
+    <article class="glass-card pad"><div class="eyebrow">Find Your Four</div><div style="margin-top:10px">${fourPreview}</div></article>
+    <article class="glass-card pad"><div class="eyebrow">Active build</div>
+      ${activeM ? `<h3 style="margin:8px 0 6px">${esc(activeM.title)}</h3>${bar(ap.done, ap.total)}<p class="tiny" style="margin:6px 0">${ap.done} of ${ap.total} tasks done · ${ap.msDone} of ${ap.msTotal} milestones</p>
+      <p>${myTask ? `Next step: <b style="color:var(--tx)">${esc(myTask.title)}</b>` : 'No open task is assigned to you.'}</p>
+      <div class="row" style="margin-top:12px">${btn('Open mission', 'go', `data-view="missions" data-id="${activeM.id}"`)}</div>` : '<p>No active mission yet.</p>'}
+    </article>
+    <article class="glass-card pad"><div class="eyebrow">Relevant opportunity</div>
+      ${opp ? `<h3 style="margin:8px 0 4px">${esc(opp.title)}</h3><p class="tiny">${esc(opp.org)} · ${esc(OPP_TYPE[opp.type])}</p><p style="margin:8px 0">${esc(oppFit(opp).label)} for your ${esc(GOAL_LABEL[opp.goal].toLowerCase())} weight.</p>
+      <div class="row">${btn('View details', 'opp', `data-id="${opp.id}"`)}</div>` : '<p>Nothing relevant right now.</p>'}
+    </article>
+    <article class="glass-card pad"><div class="eyebrow">Upcoming live session</div>
+      ${ses ? `<h3 style="margin:8px 0 4px">${esc(ses.title)}</h3><p class="tiny">${fmtDT(ses.date)} · ${ses.mins} min</p><p style="margin:8px 0">${ses.rsvp ? badge('Seat reserved', 'b-ok') : badge('Not reserved')}</p>
+      <div class="row">${btn(ses.rsvp ? 'Cancel RSVP' : 'RSVP', 'rsvp', `data-id="${ses.id}"`, ses.rsvp ? '' : 'primary')}${btn('Details', 'session', `data-id="${ses.id}"`)}</div>` : '<p>No upcoming sessions.</p>'}
+    </article>
+  </div>
+  <div class="sec-title"><h2>Finite discovery</h2><span class="tiny">${FEED.length} items · then you're caught up</span></div>
+  <div class="grid g2">
+    ${FEED.map(f => { const p = person(f.by), sv = state.feedSaved.includes(f.id); return `<article class="glass-card pad-s"><div class="row">${avatar(p, 'sm')}<div><b>${esc(p.name)}</b><div class="tiny">${esc(f.tag)}</div></div></div><h4 style="margin:10px 0 4px">${esc(f.title)}</h4><p>${esc(f.body)}</p><div class="row" style="margin-top:10px">${btn(sv ? 'Saved ✓' : 'Save', 'feedSave', `data-id="${f.id}"`, 'sm')}${btn('View profile', 'profile', `data-id="${p.id}"`, 'sm')}</div></article>`; }).join('')}
+  </div>
+  <div class="glass-panel pad" style="margin-top:16px;text-align:center"><b style="font-family:var(--serif);font-size:1.15rem;color:var(--ivory)">You're caught up.</b><p style="margin-top:4px">There is no infinite scroll here. Come back when something genuinely new needs you.</p></div>`;
+}
+const OPP_TYPE = {startup:'Startup opportunity', job:'Job', freelance:'Freelance project', customer:'Early customers'};
+
+/* ---------- FIND YOUR FOUR ---------- */
+function fourLifecycle() {
+  const f = state.four; if (f.circleId) return 'active';
+  const acc = f.slots.filter(s => s.status === 'accepted').length, req = f.slots.filter(s => s.status === 'requested').length;
+  if (acc >= 2) return 'circle_ready'; if (acc === 1) return 'partially_accepted'; if (req) return 'intros_requested'; return 'generated';
+}
+function viewFour() {
+  const f = state.four, pc = profileComplete();
+  if (!f.optIn) {
+    return `${head('Find Your Four', 'Four complementary, opt-in introductions intended to form a small builder circle — with the reason for each match shown plainly.')}
+    <div class="split">
+      <section class="glass-panel pad">
+        <h2>How it works</h2>
+        <ul style="margin:12px 0 0 18px;color:var(--tx2);display:grid;gap:8px">
+          <li>It is <b style="color:var(--tx)">opt-in</b>. Nothing happens until you turn it on, and you can turn it off at any time.</li>
+          <li>Only members who also opted in, have capacity and are not blocked are considered.</li>
+          <li>Every profile comes with <b style="color:var(--tx)">Why this match?</b>, including limitations.</li>
+          <li>You request introductions one by one. Nobody is enrolled into a group automatically.</li>
+          <li>If fewer than four eligible people exist, you see fewer — never invented matches.</li>
+          <li>A match is not a promise of friendship, success or employment.</li>
+        </ul>
+      </section>
+      <section class="glass-panel pad">
+        <h3>Minimum profile</h3>
+        ${pc.ok ? '<p style="margin:8px 0">Your minimum viable profile is complete.</p>' : `<p style="margin:8px 0">Still needed: ${esc(pc.missing.join(', '))}.</p>`}
+        <div class="stack" style="margin-top:12px">${btn('Turn on Find Your Four', 'fourOn', pc.ok ? '' : 'disabled', 'primary')}${pc.ok ? '' : btn('Complete profile', 'go', 'data-view="settings"')}</div>
+      </section>
+    </div>`;
+  }
+  if (ui.loading === 'four') {
+    return `${head('Find Your Four', 'Assembling a complementary set from members who opted in…')}<div class="grid g4">${[1, 2, 3, 4].map(() => '<div class="glass-card static pad"><div class="skeleton" style="height:42px;width:42px;border-radius:50%"></div><div class="skeleton" style="height:16px;margin-top:14px"></div><div class="skeleton" style="height:12px;margin-top:10px;width:70%"></div><div class="skeleton" style="height:90px;margin-top:14px"></div></div>').join('')}</div>`;
+  }
+  const lc = fourLifecycle(), accepted = f.slots.filter(s => s.status === 'accepted');
+  const teamIds = f.slots.filter(s => !s.dismissed && s.status !== 'declined').map(s => s.id);
+  const have = new Set(teamIds.flatMap(id => person(id).skills.map(sk => SKILL_CAT[sk])));
+  const covHtml = Object.keys(CAT_LABEL).map(c => `<span class="chip ${have.has(c) ? 'on' : ''}" style="${have.has(c) ? 'color:var(--ok);border-color:rgba(143,181,154,.5)' : ''}">${have.has(c) ? '✓ ' : ''}${CAT_LABEL[c]}</span>`).join('');
+  return `${head('Find Your Four', 'Complementary, opt-in introductions. You choose who to contact; nothing is automatic.',
+    `${btn('Refresh suggestions', 'fourRefresh', '', '')}${accepted.length && !f.circleId ? btn('Propose circle invitation', 'circleFromFour', '', 'primary') : ''}${btn('Turn off', 'fourOff', '', 'ghost')}`)}
+  <div class="glass-panel pad-s row between" style="margin-bottom:16px"><div class="row"><span class="eyebrow">Lifecycle</span>${badge(lc, 'b-art')}<span class="tiny">generated → intros_requested → partially_accepted → circle_ready → active</span></div><div class="cover" aria-label="Skill coverage">${covHtml}</div></div>
+  ${f.slots.length < 4 ? `<div class="note" style="margin-bottom:14px">Showing ${f.slots.length} of 4. Rather than fabricate matches, Nightclub shows fewer when eligible, opted-in members are limited. ${f.waitlist ? 'You are on the waitlist; you will be told only if a genuinely qualifying profile appears.' : btn('Join waitlist', 'waitlist', '', 'sm')}</div>` : ''}
+  <div class="grid g4">${f.slots.map((s, i) => fourCard(s, i)).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No eligible members right now.</div>'}</div>
+  <div class="note" style="margin-top:16px">Prototype note: members above are fictional demo personas. “Simulate” controls exist only so you can try each state; real replies would come from other members.</div>`;
+}
+function fourCard(s, i) {
+  const p = person(s.id), x = explain(p), sc = tier(pairScore(person('me'), p));
+  const steps = `<div class="stepper" aria-label="Introduction status"><b class="on">Suggested</b>→<b class="${s.status === 'requested' || s.status === 'accepted' || s.status === 'declined' ? 'on' : ''}">Requested</b>→<b class="${s.status === 'accepted' ? 'on' : s.status === 'declined' ? 'bad' : ''}">${s.status === 'declined' ? 'Declined' : 'Accepted'}</b></div>`;
+  if (s.dismissed) return `<article class="glass-card static pad pillar"><div class="row">${avatar(p)}<div><b>${esc(p.name)}</b><div class="tiny">Dismissed — won't be suggested again</div></div></div><div class="row">${btn('Undo', 'undismiss', `data-i="${i}"`, 'sm')}${btn('Suggest replacement', 'replace', `data-i="${i}"`, 'sm')}</div></article>`;
+  const acts = s.status === 'none' ? `${btn('Request introduction', 'intro', `data-id="${p.id}"`, 'primary sm')}${btn(s.saved ? 'Saved ✓' : 'Save', 'fourSave', `data-i="${i}"`, 'sm')}${btn('Dismiss', 'dismiss', `data-i="${i}"`, 'sm')}`
+    : s.status === 'requested' ? `${btn('Withdraw request', 'withdraw', `data-i="${i}"`, 'sm')}<span class="tiny" style="flex-basis:100%">Awaiting their reply. A reply is not guaranteed.</span><span class="tiny" style="flex-basis:100%">Prototype only: ${btn('Simulate accept', 'simAccept', `data-i="${i}"`, 'sm ghost')}${btn('Simulate decline', 'simDecline', `data-i="${i}"`, 'sm ghost')}</span>`
+    : s.status === 'accepted' ? `${btn('Message', 'openChat', `data-id="${p.id}"`, 'primary sm')}` : `<span class="tiny" style="flex-basis:100%">They declined. Thank you for trying.</span>${btn('Suggest replacement', 'replace', `data-i="${i}"`, 'sm')}`;
+  return `<article class="glass-card static pad pillar">
+    <div class="row">${avatar(p)}<div><b>${esc(p.name)}</b><div class="tiny">${esc(p.role)}</div></div></div>
+    <div>${badge(sc, 'b-art')}</div>
+    ${steps}
+    <dl class="kv" style="grid-template-columns:78px 1fr"><dt>Offers</dt><dd>${chips(p.skills)}</dd><dt>Seeks</dt><dd>${chips(p.seeking)}</dd><dt>Available</dt><dd>${esc(p.availLabel)}</dd></dl>
+    <div class="note"><b style="color:var(--ivory)">Proposed contribution</b><br>${esc(contribution(p))}</div>
+    <details class="why"><summary>Why this match?</summary><div class="body"><ul>${x.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul><b style="color:var(--warn)">Limitations</b><ul>${x.limits.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div></details>
+    <details class="why"><summary>Portfolio evidence</summary><div class="body">${p.evidence.map(e => `<div style="margin:6px 0">${esc(e.t)}<br>${lvl(e.level)}</div>`).join('')}</div></details>
+    <div class="row" style="margin-top:auto">${acts}${btn('View profile', 'profile', `data-id="${p.id}"`, 'sm ghost')}</div>
+  </article>`;
+}
+
+/* ---------- DISCOVER ---------- */
+function discoverResults() {
+  const d = state.disc, q = d.q.trim().toLowerCase(), me = person('me');
+  const match = txt => !q || txt.toLowerCase().includes(q);
+  if (d.tab === 'people') {
+    let list = PEOPLE.filter(p => p.visible && !state.blocked.includes(p.id)).filter(p => match([p.name, p.role, p.skills.join(' '), p.seeking.join(' '), p.interests.join(' '), p.bio].join(' ')));
+    if (d.lang !== 'any') list = list.filter(p => p.lang.includes(d.lang));
+    if (d.avail !== 'any') list = list.filter(p => p.avail === d.avail);
+    if (d.goal !== 'any') list = list.filter(p => p.goals[d.goal] >= .3);
+    if (d.skill !== 'any') list = list.filter(p => p.skills.includes(d.skill));
+    const sorts = {relevance:(a, b) => pairScore(me, b) - pairScore(me, a), name:(a, b) => a.name.localeCompare(b.name), availability:(a, b) => AV[b.avail] - AV[a.avail]};
+    list.sort(sorts[d.sort]);
+    return `<p class="tiny" style="margin-bottom:10px">${list.length} member${list.length === 1 ? '' : 's'} · privacy-safe profiles only (no phone or email)</p><div class="grid g3">${list.map(p => `<article class="glass-card pad-s"><div class="row">${avatar(p)}<div><b>${esc(p.name)}</b><div class="tiny">${esc(p.role)}</div></div>${state.connections[p.id] ? badge('Connected', 'b-ok') : ''}${!p.capacity ? badge('At capacity', 'b-warn') : ''}</div><div style="margin:10px 0">${chips(p.skills)}</div><p class="tiny">${esc(p.availLabel)} · ${esc(p.lang.join(', '))}</p><p style="margin-top:6px;font-size:.82rem">${esc(p.bio)}</p><div class="row" style="margin-top:12px">${btn('View profile', 'profile', `data-id="${p.id}"`, 'sm')}${state.connections[p.id] ? btn('Message', 'openChat', `data-id="${p.id}"`, 'sm primary') : btn('Request introduction', 'intro', `data-id="${p.id}"`, 'sm primary')}</div></article>`).join('') || '<div class="empty">No members match these filters. Try fewer filters.</div>'}</div><div class="glass-panel pad-s" style="margin-top:16px;text-align:center"><span class="tiny">You're caught up — that's every result.</span></div>`;
+  }
+  if (d.tab === 'projects') {
+    const list = PROJECTS.filter(j => match([j.name, j.desc, j.tags.join(' '), j.needs.join(' ')].join(' ')) && !state.blocked.includes(j.owner));
+    return `<p class="tiny" style="margin-bottom:10px">${list.length} project${list.length === 1 ? '' : 's'}</p><div class="grid g3">${list.map(j => { const o = person(j.owner), req = state.contribRequests[j.id]; return `<article class="glass-card pad-s"><div class="row between"><h4>${esc(j.name)}</h4>${badge(esc(j.stage))}</div><p style="margin:6px 0">${esc(j.desc)}</p><div>${chips(j.tags)}</div><p class="tiny" style="margin:8px 0">Needs: ${esc(j.needs.join(', '))} · Owner: ${esc(o.name)}</p><div class="row">${btn(req ? 'Request sent ✓' : 'Ask to contribute', 'contribute', `data-id="${j.id}"`, 'sm primary')}${btn('Owner profile', 'profile', `data-id="${o.id}"`, 'sm')}</div></article>`; }).join('') || '<div class="empty">No projects match.</div>'}</div>`;
+  }
+  const isSkill = d.tab === 'skills';
+  const pool = isSkill ? ALL_SKILLS : [...new Set(PEOPLE.flatMap(p => p.interests))].sort();
+  const list = pool.filter(s => match(s));
+  return `<p class="tiny" style="margin-bottom:10px">Choose one to see matching members.</p><div class="row">${list.map(s => { const n = PEOPLE.filter(p => p.visible && (isSkill ? p.skills : p.interests).includes(s)).length; return `<button class="chip" data-action="pickTag" data-tag="${esc(s)}" data-kind="${d.tab}">${esc(s)} · ${n}</button>`; }).join('') || '<div class="empty">Nothing matches.</div>'}</div>`;
+}
+function viewDiscover() {
+  const d = state.disc, langs = ['English', 'Telugu', 'Hindi'];
+  const opt = (v, cur, l) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`;
+  const saved = state.savedSearches;
+  return `${head('Discover', 'Search with intent. Results respect each member’s visibility, block lists and no-contact preferences.', btn('Save this search', 'saveSearch', '', ''))}
+  <div class="tabs" role="tablist">${['people', 'projects', 'skills', 'interests'].map(t => `<button class="tab ${d.tab === t ? 'active' : ''}" role="tab" aria-selected="${d.tab === t}" data-action="discTab" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
+  <div class="glass-panel pad-s" style="margin-bottom:16px">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));align-items:end">
+      <label class="field" style="grid-column:span 2;min-width:200px">Search<input type="search" data-disc="q" value="${esc(d.q)}" placeholder="Name, skill, interest, project…" aria-label="Search"></label>
+      ${d.tab === 'people' ? `
+      <label class="field">Language<select data-disc="lang">${opt('any', d.lang, 'Any')}${langs.map(l => opt(l, d.lang, l)).join('')}</select></label>
+      <label class="field">Availability<select data-disc="avail">${opt('any', d.avail, 'Any')}${opt('low', d.avail, '3–4 hrs')}${opt('mid', d.avail, '6–8 hrs')}${opt('high', d.avail, '10+ hrs')}</select></label>
+      <label class="field">Goal emphasis<select data-disc="goal">${opt('any', d.goal, 'Any')}${GOAL_KEYS.map(k => opt(k, d.goal, GOAL_LABEL[k])).join('')}</select></label>
+      <label class="field">Skill<select data-disc="skill">${opt('any', d.skill, 'Any')}${ALL_SKILLS.map(s => opt(s, d.skill, s)).join('')}</select></label>
+      <label class="field">Sort<select data-disc="sort">${opt('relevance', d.sort, 'Relevance to you')}${opt('name', d.sort, 'Name')}${opt('availability', d.sort, 'Availability')}</select></label>` : ''}
+    </div>
+    ${saved.length ? `<div class="row" style="margin-top:12px"><span class="tiny">Saved searches:</span>${saved.map(s => `<span class="chip"><button class="chip" style="border:0;padding:0" data-action="runSaved" data-id="${s.id}">${esc(s.label)}</button><span class="x" role="button" tabindex="0" aria-label="Remove saved search" data-action="delSaved" data-id="${s.id}">×</span></span>`).join('')}</div>` : ''}
+  </div>
+  <div id="disc-results">${discoverResults()}</div>`;
+}
+
+/* ---------- CIRCLES ---------- */
+function viewCircles() {
+  if (state.viewId && circleOf(state.viewId)) return viewCircleDetail(circleOf(state.viewId));
+  return `${head('Circles', 'Shared homes for small teams: roles, goals, cadence and a place to talk. Two to five people is plenty.', btn('New circle', 'newCircle', '', 'primary'))}
+  <div class="grid g2">${state.circles.map(c => { const m = missionOf(c.missionId), p = m ? missionProgress(m) : null, nm = m && m.milestones.find(x => !x.done);
+    return `<article class="glass-card pad"><div class="row between"><h3>${esc(c.name)}</h3>${badge(c.status, c.status === 'Active' ? 'b-ok' : '')}</div>
+      <div class="row" style="margin:10px 0"><div class="avatars">${c.members.map(x => avatar(person(x.id), 'sm')).join('')}</div><span class="tiny">${c.members.length} member${c.members.length > 1 ? 's' : ''}</span></div>
+      <p>${esc(c.goals[0] || 'No shared goal yet')}</p>
+      ${p ? `<div style="margin:10px 0">${bar(p.done, p.total)}<p class="tiny" style="margin-top:4px">${p.done} of ${p.total} tasks done</p></div>` : ''}
+      <p class="tiny">${nm ? `Next milestone: ${esc(nm.title)} · ${fmtD(nm.date)}` : 'No upcoming milestone'}</p>
+      <div class="row" style="margin-top:12px">${btn('Open circle', 'go', `data-view="circles" data-id="${c.id}"`, 'primary sm')}</div></article>`; }).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No circles yet. Accept an introduction or start one yourself.</div>'}</div>`;
+}
+function viewCircleDetail(c) {
+  const m = missionOf(c.missionId), p = m ? missionProgress(m) : null;
+  return `${head(esc(c.name), 'A shared workspace for this team.', `${btn('← All circles', 'go', 'data-view="circles"')}${btn('Leave circle', 'leaveCircle', `data-id="${c.id}"`, 'danger')}`)}
+  <div class="split">
+    <div class="stack">
+      <section class="glass-panel pad"><div class="row between"><h3>Members & roles</h3><label class="field" style="min-width:160px">Status<select data-circle-status="${c.id}">${['Forming', 'Active', 'Paused', 'Completed'].map(s => `<option ${c.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div>
+        <div class="grid g2" style="margin-top:12px">${c.members.map(x => { const pp = person(x.id); return `<div class="row glass-card static pad-s">${avatar(pp)}<div><b>${esc(x.id === 'me' ? 'You' : pp.name)}</b><div class="tiny">${esc(x.role)}</div></div>${x.id !== 'me' ? `<span style="margin-left:auto">${btn('Profile', 'profile', `data-id="${x.id}"`, 'sm ghost')}</span>` : ''}</div>`; }).join('')}</div>
+        <p class="tiny" style="margin-top:10px">Circles work best with two to five people. There is no pressure to grow the team.</p></section>
+      <section class="glass-panel pad"><h3>Shared goals</h3>
+        <ul style="margin:10px 0 0 18px;color:var(--tx2)">${c.goals.map((g, i) => `<li>${esc(g)} <button class="chip" style="padding:0 6px" data-action="delGoal" data-id="${c.id}" data-i="${i}" aria-label="Remove goal">×</button></li>`).join('') || '<li>No goals yet.</li>'}</ul>
+        <form class="inline-form" data-form="circleGoal" style="margin-top:12px"><input type="hidden" name="id" value="${c.id}"><input type="text" name="goal" placeholder="Add a shared goal" required aria-label="Shared goal"><button class="btn sm">Add</button></form></section>
+      <section class="glass-panel pad"><h3>Discussion</h3>
+        <div class="stack" style="margin:12px 0;max-height:300px;overflow:auto">${c.posts.map(po => { const pp = person(po.by); return `<div class="row" style="align-items:flex-start;flex-wrap:nowrap">${avatar(pp, 'sm')}<div><b>${esc(po.by === 'me' ? 'You' : pp.name)}</b> <span class="tiny">${ago(po.t)}</span><p style="color:var(--tx)">${esc(po.text)}</p></div></div>`; }).join('') || '<p>No posts yet.</p>'}</div>
+        <form class="inline-form" data-form="circlePost"><input type="hidden" name="id" value="${c.id}"><input type="text" name="text" placeholder="Share an update or ask for input" required aria-label="Post"><button class="btn primary sm">Post</button></form></section>
+    </div>
+    <div class="stack">
+      <section class="glass-panel pad"><h3>Mission</h3>
+        ${m ? `<p style="margin:6px 0">${esc(m.title)}</p>${bar(p.done, p.total)}<p class="tiny" style="margin:6px 0">${p.done} of ${p.total} tasks · ${p.msDone} of ${p.msTotal} milestones</p>${btn('Open mission', 'go', `data-view="missions" data-id="${m.id}"`, 'sm primary')}
+        <hr class="rule"><b>Upcoming milestones</b>${m.milestones.filter(x => !x.done).map(x => `<p style="margin-top:6px">${esc(x.title)} <span class="tiny">· ${fmtD(x.date)}</span></p>`).join('') || '<p class="tiny">None pending.</p>'}`
+        : `<p style="margin:6px 0">No mission yet.</p>${btn('Start a Build Mission', 'newMission', `data-circle="${c.id}"`, 'sm primary')}`}</section>
+      <section class="glass-panel pad"><h3>Working agreement</h3>
+        <form class="form" data-form="agreement" style="margin-top:8px"><input type="hidden" name="id" value="${c.id}">
+          <label class="field">Cadence<input type="text" name="cadence" value="${esc(c.agreement.cadence)}" placeholder="e.g. Tue & Sat check-in"></label>
+          <label class="field">Communication norms<textarea name="norms" placeholder="How will you work together?">${esc(c.agreement.norms)}</textarea></label>
+          <div class="row between"><span>${c.agreement.confirmed ? badge('Confirmed', 'b-ok') : badge('Not yet confirmed', 'b-warn')}</span><button class="btn sm">Save & confirm</button></div></form></section>
+    </div>
+  </div>`;
+}
+
+/* ---------- BUILD MISSIONS ---------- */
+const TASK_STATUS = {todo:'To do', doing:'In progress', review:'In review', done:'Done'};
+function viewMissions() {
+  if (state.viewId && missionOf(state.viewId)) return viewMissionDetail(missionOf(state.viewId));
+  return `${head('Build Missions', 'Replace passive networking with a small, real build: tasks, owners, evidence and honest progress.', btn('New mission', 'newMission', '', 'primary'))}
+  <div class="grid g2">${state.missions.map(m => { const p = missionProgress(m), c = circleOf(m.circleId); return `<article class="glass-card pad"><h3>${esc(m.title)}</h3><p style="margin:6px 0">${esc(m.summary)}</p>${bar(p.done, p.total)}<p class="tiny" style="margin:6px 0">${p.done} of ${p.total} tasks done · ${p.msDone} of ${p.msTotal} milestones · ${m.artifacts.length} artifact${m.artifacts.length === 1 ? '' : 's'}</p><p class="tiny">${c ? 'Circle: ' + esc(c.name) : 'Solo mission'}</p><div class="row" style="margin-top:12px">${btn('Open mission', 'go', `data-view="missions" data-id="${m.id}"`, 'primary sm')}</div></article>`; }).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No missions yet.</div>'}</div>`;
+}
+function viewMissionDetail(m) {
+  const c = circleOf(m.circleId), p = missionProgress(m), tab = state.missionTab;
+  const tabs = ['overview', 'tasks', 'deliverables', 'milestones', 'artifacts', 'reviews'];
+  let body = '';
+  if (tab === 'overview') body = `<section class="glass-panel pad"><h3>Overview</h3><p style="margin:8px 0">${esc(m.summary)}</p><div class="grid g3" style="margin-top:12px">
+      <div class="glass-card static pad-s"><div class="eyebrow">Tasks</div><h2>${p.done}/${p.total}</h2><p class="tiny">done</p></div>
+      <div class="glass-card static pad-s"><div class="eyebrow">Milestones</div><h2>${p.msDone}/${p.msTotal}</h2><p class="tiny">complete</p></div>
+      <div class="glass-card static pad-s"><div class="eyebrow">Artifacts</div><h2>${m.artifacts.length}</h2><p class="tiny">attached</p></div></div>
+      <p class="note" style="margin-top:14px">Progress is computed from real task and milestone states — no countdowns or decorative progress. Missed dates prompt a supportive rescope, not shame.</p></section>`;
+  if (tab === 'tasks') body = `<section class="glass-panel pad"><form class="inline-form" data-form="newTask" style="margin-bottom:14px"><input type="hidden" name="id" value="${m.id}"><input type="text" name="title" placeholder="New task title" required aria-label="Task title"><select name="owner" style="max-width:180px" aria-label="Owner">${ownerOptions(c, '')}</select><button class="btn primary sm">Add task</button></form>
+    <div class="table-wrap"><table class="t"><thead><tr><th>Task</th><th>Owner</th><th>Status</th><th></th></tr></thead><tbody>${m.tasks.map(t => `<tr><td>${esc(t.title)}</td><td><select data-task-owner="${m.id}|${t.id}" aria-label="Owner">${ownerOptions(c, t.owner)}</select></td><td><select data-task-status="${m.id}|${t.id}" aria-label="Status">${Object.keys(TASK_STATUS).map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${TASK_STATUS[s]}</option>`).join('')}</select></td><td>${t.status === 'doing' || t.status === 'review' ? btn('Request review', 'reqReview', `data-m="${m.id}" data-t="${t.id}"`, 'sm') : ''}</td></tr>`).join('')}</tbody></table></div></section>`;
+  if (tab === 'deliverables') body = `<section class="glass-panel pad"><form class="inline-form" data-form="newDeliverable" style="margin-bottom:14px"><input type="hidden" name="id" value="${m.id}"><input type="text" name="title" placeholder="New deliverable" required aria-label="Deliverable"><select name="owner" style="max-width:180px" aria-label="Owner">${ownerOptions(c, 'me')}</select><button class="btn sm">Add</button></form>
+    ${m.deliverables.map(d => `<div class="setting-row"><div><b>${esc(d.title)}</b><p>Owner: ${esc(ownerName(d.owner))}</p></div><div class="row">${d.done ? badge('Delivered', 'b-ok') : badge('Pending')}${btn(d.done ? 'Reopen' : 'Mark delivered', 'toggleDeliv', `data-m="${m.id}" data-id="${d.id}"`, 'sm')}</div></div>`).join('') || '<p>No deliverables yet.</p>'}</section>`;
+  if (tab === 'milestones') body = `<section class="glass-panel pad"><form class="inline-form" data-form="newMilestone" style="margin-bottom:14px"><input type="hidden" name="id" value="${m.id}"><input type="text" name="title" placeholder="New milestone" required aria-label="Milestone"><input type="date" name="date" required style="max-width:170px" aria-label="Date"><button class="btn sm">Add</button></form>
+    ${m.milestones.map(x => { const late = !x.done && new Date(x.date) < new Date(); return `<div class="setting-row"><div><b>${esc(x.title)}</b><p>${fmtD(x.date)} ${x.done ? '' : late ? '· ' + badge('Past planned date', 'b-warn') : ''}</p></div><div class="row">${x.done ? badge('Complete', 'b-ok') : ''}${late ? btn('Rescope', 'rescope', `data-m="${m.id}" data-id="${x.id}"`, 'sm') : ''}${btn(x.done ? 'Reopen' : 'Mark complete', 'toggleMs', `data-m="${m.id}" data-id="${x.id}"`, x.done ? 'sm' : 'sm primary')}</div></div>`; }).join('') || '<p>No milestones yet.</p>'}</section>`;
+  if (tab === 'artifacts') body = `<section class="glass-panel pad"><form class="form" data-form="newArtifact" style="margin-bottom:14px"><input type="hidden" name="id" value="${m.id}">
+      <div class="grid g2"><label class="field">Link (optional)<input type="text" name="link" placeholder="https://…"></label><label class="field">File (stays on this device)<input type="file" name="file"></label></div>
+      <label class="field">Note<input type="text" name="note" placeholder="What does this show?"></label><div><button class="btn primary sm">Attach artifact</button> <span class="tiny">Local demo: only the file name and size are stored, never its contents.</span></div></form>
+    ${m.artifacts.map(a => `<div class="setting-row"><div><b>${esc(a.name)}</b><p>${esc(a.note || '')} · by ${esc(ownerName(a.by))} · ${ago(a.t)}</p></div>${badge(a.kind === 'file' ? 'File' : 'Link')}</div>`).join('') || '<p>No artifacts attached yet.</p>'}</section>`;
+  if (tab === 'reviews') body = `<section class="glass-panel pad"><p class="note" style="margin-bottom:14px">Short structured reviews improve matching. No public low-star shaming, no retaliation, and nothing is hidden from you.</p>
+    ${m.reviews.map(r => `<div class="setting-row"><div><b>${esc(m.tasks.find(t => t.id === r.taskId)?.title || 'Task')}</b><p>Delivered: ${esc(r.delivered)} · Responsive: ${esc(r.responsive)} · Collaborate again: ${esc(r.again)}</p>${r.note ? `<p>${esc(r.note)}</p>` : ''}</div><span class="tiny">${ago(r.t)}</span></div>`).join('') || '<p>No reviews yet.</p>'}
+    <div style="margin-top:12px">${btn('Add a review', 'addReview', `data-m="${m.id}"`, 'primary sm')}</div></section>`;
+  return `${head(esc(m.title), c ? `Circle: ${esc(c.name)}` : '', btn('← All missions', 'go', 'data-view="missions"'))}
+  <div class="tabs" role="tablist">${tabs.map(t => `<button class="tab ${tab === t ? 'active' : ''}" role="tab" aria-selected="${tab === t}" data-action="missionTab" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>${body}`;
+}
+
+/* ---------- SESSIONS ---------- */
+function viewSessions() {
+  const tab = state.sessionTab, used = sessionsUsed(), attended = used.filter(s => s.attended === 'attended').length, reserved = used.filter(s => s.rsvp && s.attended !== 'attended').length;
+  const list = tab === 'upcoming' ? upcoming() : tab === 'past' ? past() : [];
+  const card = s => `<article class="glass-card pad"><div class="row between"><h3>${esc(s.title)}</h3>${s.rsvp ? badge('Seat reserved', 'b-ok') : badge('Not reserved')}</div><p class="tiny" style="margin:4px 0">${fmtDT(s.date)} · ${s.mins} min · ${esc(s.host)}</p><p>${esc(s.desc)}</p>
+    <div class="row" style="margin-top:12px">${tab === 'upcoming' ? btn(s.rsvp ? 'Cancel RSVP' : 'RSVP', 'rsvp', `data-id="${s.id}"`, s.rsvp ? '' : 'primary sm') : `${badge(s.attended === 'attended' ? 'Attended' : s.attended === 'missed' ? 'Did not attend' : 'Attendance not recorded', s.attended === 'attended' ? 'b-ok' : '')}${btn('Update attendance', 'attendance', `data-id="${s.id}"`, 'sm')}`}${btn('Details', 'session', `data-id="${s.id}"`, 'sm')}</div></article>`;
+  const exps = state.sessions.flatMap(s => s.experiments.map(e => ({s, e})));
+  return `${head('Sessions', 'Live learning that turns into building. RSVP reserves a seat — it does not count as attendance.')}
+  <div class="glass-panel pad-s" style="margin-bottom:16px"><div class="row between"><div><div class="eyebrow">This month's entitlement (configurable by admins)</div><b style="font-size:1.1rem;font-family:var(--serif);color:var(--ivory)">${attended} attended · ${reserved} reserved · ${state.config.includedSessions} included</b></div><div style="min-width:200px;flex:1;max-width:320px">${bar(attended + reserved, state.config.includedSessions)}</div></div></div>
+  <div class="tabs" role="tablist">${['upcoming', 'past', 'experiments'].map(t => `<button class="tab ${tab === t ? 'active' : ''}" role="tab" aria-selected="${tab === t}" data-action="sessionTab" data-tab="${t}">${t === 'experiments' ? 'Build experiments' : t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</div>
+  ${tab === 'experiments' ? `<div class="grid g2">${exps.map(({s, e}) => `<article class="glass-card pad"><div class="eyebrow">${esc(s.title)}</div><h4 style="margin:6px 0">${esc(e.title)}</h4>${e.demo ? `<p class="note">Your demo note: ${esc(e.demo)}</p>` : ''}<div class="row" style="margin-top:10px">${e.claimed ? badge('Claimed', 'b-ok') : ''}${btn(e.claimed ? 'Unclaim' : 'Claim experiment', 'claimExp', `data-s="${s.id}" data-id="${e.id}"`, 'sm')}${e.claimed ? btn(e.demo ? 'Edit demo' : 'Submit demo', 'submitDemo', `data-s="${s.id}" data-id="${e.id}"`, 'sm primary') : ''}</div></article>`).join('')}</div>`
+  : `<div class="grid g2">${list.map(card).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No sessions here.</div>'}</div>`}`;
+}
+
+/* ---------- MESSAGES ---------- */
+function convoListHtml() {
+  const q = state.msg.q.trim().toLowerCase();
+  const list = state.convos.filter(c => !state.blocked.includes(c.with)).filter(c => !q || person(c.with).name.toLowerCase().includes(q) || c.msgs.some(m => m.text.toLowerCase().includes(q)));
+  return list.map(c => { const p = person(c.with), last = c.msgs[c.msgs.length - 1]; return `<button class="convo ${state.msg.active === c.id ? 'active' : ''}" data-action="openConvo" data-id="${c.id}">${avatar(p)}<div style="min-width:0;flex:1"><div class="name"><span>${esc(p.name)}</span>${c.unread ? `<span class="unread">${c.unread}</span>` : ''}</div><div class="last">${c.muted ? '🔕 ' : ''}${esc(last ? last.text : '')}</div></div></button>`; }).join('') || '<div class="empty">No conversations match.</div>';
+}
+function chatHtml() {
+  const c = state.convos.find(x => x.id === state.msg.active && !state.blocked.includes(x.with));
+  if (!c) return '<div class="empty" style="margin:auto">Select a conversation. Messaging opens only after a connection is accepted.</div>';
+  const p = person(c.with);
+  return `<div class="row between" style="padding:12px 14px;border-bottom:1px solid var(--glass-b)"><div class="row"><button class="icon-btn back-btn" data-action="chatBack" aria-label="Back to conversations"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>${avatar(p, 'sm')}<div><b>${esc(p.name)}</b><div class="tiny">${esc(p.role)}</div></div></div><button class="icon-btn" data-action="menu" data-menu="chat" data-id="${c.id}" aria-label="Conversation options"><svg viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/></svg></button></div>
+  <div class="chat-scroll" id="chat-scroll">${c.msgs.map(m => `<div class="bubble ${m.from}">${esc(m.text)}${m.from === 'sys' ? '' : `<time>${ago(m.t)}${m.sim ? ' · simulated reply' : ''}</time>`}</div>`).join('')}</div>
+  <form class="composer" data-form="send"><input type="hidden" name="id" value="${c.id}"><input type="text" name="text" placeholder="Write a message (no phone numbers or emails needed)" autocomplete="off" required aria-label="Message"><button class="btn primary">Send</button></form>
+  <div style="padding:0 12px 10px"><button class="btn sm ghost" data-action="simReply" data-id="${c.id}">Simulate a reply (prototype only)</button></div>`;
+}
+function viewMessages() {
+  const c = state.convos.find(x => x.id === state.msg.active), p = c ? person(c.with) : null;
+  return `${head('Messages', 'In-app only. Accepting a connection grants messaging — never access to email or phone.')}
+  <div class="msg-layout ${state.msg.chatOpen ? 'chat-open' : ''}">
+    <section class="glass-chat convo-col"><div style="padding:12px"><input type="search" data-msgsearch value="${esc(state.msg.q)}" placeholder="Search conversations" aria-label="Search conversations"></div><div style="overflow:auto;flex:1" id="convo-list">${convoListHtml()}</div></section>
+    <section class="glass-chat chat-col" id="chat">${chatHtml()}</section>
+    <aside class="glass-chat prof-col pad" id="prof-prev">${profPrevHtml(p)}</aside>
+  </div>`;
+}
+function profPrevHtml(p) {
+  if (!p) return '<p class="tiny">Profile preview appears here.</p>';
+  return `<div style="text-align:center">${avatar(p, 'lg')}<h3 style="margin-top:8px">${esc(p.name)}</h3><p class="tiny">${esc(p.role)}</p></div><hr class="rule"><dl class="kv" style="grid-template-columns:80px 1fr"><dt>Offers</dt><dd>${chips(p.skills)}</dd><dt>Seeks</dt><dd>${chips(p.seeking)}</dd><dt>Available</dt><dd>${esc(p.availLabel)}</dd><dt>Contact</dt><dd><span class="tiny">🔒 Hidden. Use in-app chat.</span></dd></dl><div class="stack" style="margin-top:12px">${btn('View profile', 'profile', `data-id="${p.id}"`, 'sm')}${btn('Report', 'report', `data-id="${p.id}"`, 'sm')}${btn('Block', 'block', `data-id="${p.id}"`, 'sm danger')}</div>`;
+}
+
+/* ---------- OPPORTUNITIES ---------- */
+const OPP_STATUS = {none:'Not started', interested:'Interest expressed', applied:'Applied', interviewing:'In conversation', pilot:'Pilot / paid work started', closed:'Closed — not selected', withdrawn:'Withdrawn'};
+function viewOpportunities() {
+  const f = state.oppFilter; let list = state.opps.filter(o => o.verified && (f.type === 'all' || o.type === f.type));
+  list = list.map(o => ({o, fit:oppFit(o)}));
+  if (f.matchGoals) list.sort((a, b) => b.fit.score - a.fit.score);
+  return `${head('Opportunities', 'Startup roles, jobs, freelance work and early customers. These are introductions — not hiring guarantees.')}
+  <div class="note" style="margin-bottom:14px">Only legitimacy-reviewed listings appear. Nightclub never guarantees employment, income or customers. Contact data is shared only with your consent.</div>
+  <div class="row between" style="margin-bottom:14px"><div class="row">${['all', 'startup', 'job', 'freelance', 'customer'].map(t => `<button class="chip ${f.type === t ? 'on' : ''}" data-action="oppType" data-type="${t}">${t === 'all' ? 'All' : OPP_TYPE[t]}</button>`).join('')}</div>
+    <label class="row"><span class="tiny">Rank by my goal weights</span>${sw('oppFilter.matchGoals', f.matchGoals, 'r')}</label></div>
+  <div class="grid g2">${list.map(({o, fit}) => `<article class="glass-card pad"><div class="row between"><span class="eyebrow">${esc(OPP_TYPE[o.type])}</span>${badge(OPP_STATUS[o.status], o.status === 'none' ? '' : 'b-art')}</div><h3 style="margin:6px 0 2px">${esc(o.title)}</h3><p class="tiny">${esc(o.org)} · ${badge('Reviewed', 'b-ok')}</p>
+    <p style="margin:8px 0">${esc(fit.label)} · matches ${fit.have.length} of ${o.needs.length} needed skills · goal: ${esc(GOAL_LABEL[o.goal])} (${Math.round(state.me.goals[o.goal] * 100)}%)</p>
+    <div class="row">${btn('View details & fit', 'opp', `data-id="${o.id}"`, 'sm')}${o.status === 'none' ? btn('Express interest', 'interest', `data-id="${o.id}"`, 'sm primary') : ''}</div></article>`).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No opportunities for this filter.</div>'}</div>
+  <div class="glass-panel pad-s" style="margin-top:16px;text-align:center"><span class="tiny">You're caught up. We will not repeat reminders about the same listing.</span></div>`;
+}
+
+/* ---------- BUILDER PASSPORT ---------- */
+function viewPassport() {
+  const me = state.me, pp = state.passport;
+  const legend = `<div class="row" style="margin-bottom:12px">${lvl('self')} <span class="tiny">you said it</span> ${lvl('peer')} <span class="tiny">a collaborator acknowledged it</span> ${lvl('artifact')} <span class="tiny">backed by a reviewed artifact</span></div>`;
+  return `${head('Builder Passport', 'Portable proof of what you built and what you contributed — with honest verification levels.', `${btn('Preview public view', 'passportPreview', '')}${btn('Add contribution', 'addContrib', '', 'primary')}`)}
+  <section class="glass-panel pad row" style="gap:20px">${avatar({name:me.name, hue:38}, 'lg')}<div style="flex:1;min-width:200px"><h2>${esc(me.name)}</h2><p>${esc(me.headline)}</p><div style="margin-top:8px">${chips(me.skills)}</div></div>
+    <div class="grid" style="grid-template-columns:repeat(3,auto);gap:20px;text-align:center"><div><h2>${pp.contribs.filter(c => c.level === 'artifact').length}</h2><span class="tiny">artifact-verified</span></div><div><h2>${pp.contribs.filter(c => c.level === 'peer').length}</h2><span class="tiny">peer-acknowledged</span></div><div><h2>${pp.contribs.filter(c => c.level === 'self').length}</h2><span class="tiny">self-reported</span></div></div></section>
+  <div class="sec-title"><h2>Verified contributions</h2></div>${legend}
+  <div class="grid g2">${pp.contribs.map(c => `<article class="glass-card pad"><div class="row between">${lvl(c.level)}<span class="tiny">${fmtD(c.date)}</span></div><h3 style="margin:8px 0 2px">${esc(c.title)}</h3><p class="tiny">${esc(c.project)} · ${esc(c.role)}</p><p style="margin:8px 0">${c.evidence ? 'Evidence: ' + esc(c.evidence) : 'No evidence attached yet.'}</p>
+    <div class="row">${btn('Add evidence link', 'evidence', `data-id="${c.id}"`, 'sm')}${c.level === 'self' ? (c.ackRequested ? `${badge('Acknowledgement requested')}${btn('Simulate acknowledgement', 'simAck', `data-id="${c.id}"`, 'sm ghost')}` : btn('Request acknowledgement', 'reqAck', `data-id="${c.id}"`, 'sm')) : ''}${c.level === 'peer' && c.evidence ? btn('Simulate artifact review', 'simVerify', `data-id="${c.id}"`, 'sm ghost') : ''}${btn('Remove', 'delContrib', `data-id="${c.id}"`, 'sm ghost')}</div></article>`).join('') || '<div class="empty glass-panel" style="grid-column:1/-1">No contributions yet.</div>'}</div>
+  <div class="sec-title"><h2>Collaborator acknowledgements</h2></div>
+  <div class="grid g2">${pp.acks.map(a => { const p = person(a.from); return `<article class="glass-card pad-s"><div class="row">${avatar(p, 'sm')}<b>${esc(p.name)}</b>${lvl('peer')}</div><p style="margin-top:8px;color:var(--tx)">“${esc(a.text)}”</p><p class="tiny">${ago(a.t)}</p></article>`; }).join('')}</div>
+  <div class="sec-title"><h2>Professional achievements</h2></div>
+  <div class="glass-panel pad"><ul style="margin-left:18px;color:var(--tx2)">${pp.achievements.map(a => `<li>${esc(a)}</li>`).join('')}</ul><p class="tiny" style="margin-top:10px">Confidential client work is never exposed. Endorsements are never fabricated.</p></div>`;
+}
+
+/* ---------- MEMBERSHIP ---------- */
+function viewMembership() {
+  const m = state.membership, used = sessionsUsed(), attended = used.filter(s => s.attended === 'attended').length, reserved = used.filter(s => s.rsvp && s.attended !== 'attended').length, cfg = state.config;
+  return `${head('Membership', 'Predictable access, clearly shown. No dark patterns, no “last chance” pressure.', btn('Manage subscription', 'manageSub', '', 'primary'))}
+  ${demoBanner('Prototype: no real payments are processed and no real billing data is stored.')}
+  <div class="grid g3">
+    <article class="glass-card static pad"><div class="eyebrow">Current plan</div><h2 style="margin:6px 0">${esc(m.plan)}</h2><p>${cfg.currency}${cfg.price}/month (demo price)</p><p style="margin-top:8px">${m.status === 'active' ? badge('Active', 'b-ok') : badge('Cancelled — access continues until ' + fmtD(m.renewsOn), 'b-warn')}</p></article>
+    <article class="glass-card static pad"><div class="eyebrow">Included sessions</div><h2 style="margin:6px 0">${cfg.includedSessions} per month</h2><p class="tiny">Admin-configurable, not hard-coded.</p><div style="margin-top:10px">${bar(attended + reserved, cfg.includedSessions)}</div><p class="tiny" style="margin-top:6px">${attended} attended · ${reserved} reserved this month</p></article>
+    <article class="glass-card static pad"><div class="eyebrow">Renewal</div><h2 style="margin:6px 0">${fmtD(m.renewsOn)}</h2><p>${m.status !== 'active' ? 'Will not renew.' : m.autoRenew ? 'Renews automatically. We email a receipt, not a guilt trip.' : 'Auto-renew is off.'}</p><p class="tiny" style="margin-top:6px">${esc(m.payment)}</p></article>
+  </div>
+  <div class="sec-title"><h2>Billing history</h2></div>
+  <div class="glass-panel pad table-wrap"><table class="t"><thead><tr><th>Date</th><th>Description</th><th>Amount (demo)</th><th>Status</th></tr></thead><tbody>${m.history.map(h => `<tr><td>${fmtD(h.date)}</td><td>${esc(h.note)}</td><td>${cfg.currency}${cfg.price}</td><td>${badge('Paid', 'b-ok')}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+/* ---------- NOTIFICATIONS ---------- */
+const NCAT = {connections:'Connection requests', messages:'Messages', missions:'Mission updates', sessions:'Session reminders', opportunities:'Opportunity updates', safety:'Safety & billing'};
+function viewNotifications() {
+  const f = state.notifFilter, list = state.notifs.filter(n => f === 'all' || n.cat === f || (f === 'unread' && !n.read));
+  const np = state.notifPrefs;
+  return `${head('Notifications', 'Only events with a plausible next action. You control categories, quiet hours and digests.', btn('Mark all read', 'markAll', '', ''))}
+  <div class="split">
+    <section>
+      <div class="row" style="margin-bottom:12px">${['all', 'unread', ...Object.keys(NCAT)].map(c => `<button class="chip ${f === c ? 'on' : ''}" data-action="notifFilter" data-f="${c}">${c === 'all' ? 'All' : c === 'unread' ? 'Unread' : NCAT[c]}</button>`).join('')}</div>
+      <div class="stack">${list.map(n => `<article class="glass-card pad-s" style="${n.read ? 'opacity:.8' : 'border-color:rgba(198,167,107,.35)'}"><div class="row between"><div class="row">${n.read ? '' : '<span class="unread" style="min-width:8px;height:8px;padding:0" aria-label="Unread"></span>'}<b>${esc(n.title)}</b></div><span class="tiny">${ago(n.t)}</span></div><p style="margin:4px 0 8px">${esc(n.body)}</p><div class="row">${n.kind === 'request' && state.incoming.includes(n.pid) ? `${btn('Accept', 'acceptReq', `data-id="${n.pid}"`, 'sm primary')}${btn('Decline', 'declineReq', `data-id="${n.pid}"`, 'sm')}${btn('View profile', 'profile', `data-id="${n.pid}"`, 'sm ghost')}` : btn('Open', 'openNotif', `data-id="${n.id}"`, 'sm')}${btn(n.read ? 'Mark unread' : 'Mark read', 'toggleRead', `data-id="${n.id}"`, 'sm ghost')}${badge(NCAT[n.cat])}</div></article>`).join('') || '<div class="empty glass-panel">Nothing here. That is a feature.</div>'}</div>
+    </section>
+    <section class="glass-panel pad" style="align-self:start"><h3>Preferences</h3>${notifPrefsHtml(np)}</section>
+  </div>`;
+}
+function notifPrefsHtml(np) {
+  const row = (path, label, desc, val) => `<div class="setting-row"><div><b>${label}</b><p>${desc}</p></div>${sw(path, val)}</div>`;
+  return `${row('notifPrefs.connections', 'Connection requests', 'Introductions and accepted requests', np.connections)}${row('notifPrefs.messages', 'Messages', 'Direct messages and mentions', np.messages)}${row('notifPrefs.missions', 'Mission updates', 'Task reviews and milestones', np.missions)}${row('notifPrefs.sessions', 'Session reminders', 'Only sessions you reserved', np.sessions)}${row('notifPrefs.opportunities', 'Opportunity updates', 'Curated, goal-aligned only', np.opportunities)}${row('notifPrefs.digest', 'Daily digest', 'Low-priority activity grouped into one summary', np.digest)}${row('notifPrefs.push', 'Push notifications', 'Off by default. If on: at most two non-essential per day.', np.push)}
+  <div class="setting-row"><div><b>Safety & billing</b><p>Security and receipts are always delivered.</p></div>${sw('', true, '', true)}</div>
+  <div class="grid g2" style="margin-top:12px"><label class="field">Quiet hours start<input type="time" data-bind="notifPrefs.quietStart" value="${esc(np.quietStart)}"></label><label class="field">Quiet hours end<input type="time" data-bind="notifPrefs.quietEnd" value="${esc(np.quietEnd)}"></label></div>
+  <p class="tiny" style="margin-top:8px">Quiet hours use your own timezone setting (${esc(state.me.tz)}); location is never guessed. This prototype shows in-app notifications only.</p>`;
+}
+
+/* ---------- SETTINGS ---------- */
+function viewSettings() {
+  const tab = state.settingsTab, m = state.me, tabs = [['profile', 'Profile'], ['goals', 'Goal weights'], ['skills', 'Skills'], ['availability', 'Availability'], ['language', 'Language'], ['privacy', 'Privacy'], ['notifications', 'Notifications'], ['account', 'Account']];
+  let body = '';
+  if (tab === 'profile') body = `<div class="form"><label class="field">Display name<input type="text" data-bind="me.name" data-rerender="1" value="${esc(m.name)}"></label><label class="field">Headline<input type="text" data-bind="me.headline" value="${esc(m.headline)}"></label><label class="field">Current role<input type="text" data-bind="me.role" value="${esc(m.role)}"></label><label class="field">About<textarea data-bind="me.bio">${esc(m.bio)}</textarea></label><p class="tiny">Your phone number, email, social handles and precise location are never required and never shown.</p></div>`;
+  if (tab === 'goals') {
+    body = `<p style="margin-bottom:12px">Weights each sit between 0 and 100% and always total 100%. They steer matching and opportunity ranking. Nightclub will not silently rewrite them from your clicks.</p>
+    <div class="row" style="margin-bottom:14px">${Object.keys(GOAL_PRESETS).map(p => btn(p, 'preset', `data-p="${p}"`, 'sm')).join('')}</div>
+    ${GOAL_KEYS.map(k => `<div class="setting-row" style="flex-wrap:wrap"><label for="g-${k}" style="min-width:180px"><b>${GOAL_LABEL[k]}</b></label><input id="g-${k}" type="range" min="0" max="100" step="1" value="${Math.round(m.goals[k] * 100)}" data-goal="${k}" style="flex:1;min-width:160px;accent-color:#C6A76B"><b id="gv-${k}" style="width:48px;text-align:right;color:var(--gold)">${Math.round(m.goals[k] * 100)}%</b></div>`).join('')}
+    <p class="tiny" style="margin-top:10px">Total: <b id="goal-total">${Math.round(sumGoals(m.goals) * 100)}%</b></p>`;
+  }
+  if (tab === 'skills') body = `${skillBlock('Skills you offer', 'skills', m.skills)}${skillBlock('Skills you seek', 'seeking', m.seeking)}
+    <div class="note" style="margin-top:16px"><b style="color:var(--ivory)">Assistant suggestions (simulated, editable)</b><div class="row" style="margin-top:8px">${m.suggested.length ? m.suggested.map(s => `<span class="chip">${esc(s)} ${btn('Accept', 'acceptSug', `data-s="${esc(s)}"`, 'sm')}${btn('Dismiss', 'dismissSug', `data-s="${esc(s)}"`, 'sm ghost')}</span>`).join('') : '<span class="tiny">No suggestions. Inferred tags are always yours to confirm or remove.</span>'}</div></div>`;
+  if (tab === 'availability') body = `<label class="field" style="max-width:320px">Weekly capacity<select data-bind="me.avail"><option value="low" ${m.avail === 'low' ? 'selected' : ''}>3–4 hrs/week</option><option value="mid" ${m.avail === 'mid' ? 'selected' : ''}>6–8 hrs/week</option><option value="high" ${m.avail === 'high' ? 'selected' : ''}>10+ hrs/week</option></select></label>
+    <p style="margin:16px 0 8px"><b>Days you usually build</b></p><div class="row">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<label class="chip ${m.days.includes(d) ? 'on' : ''}"><input type="checkbox" data-array="me.days" data-val="${d}" data-rerender="1" ${m.days.includes(d) ? 'checked' : ''} style="accent-color:#C6A76B"> ${d}</label>`).join('')}</div>
+    <p class="tiny" style="margin-top:12px">Timezone: ${esc(m.tz)} (set by you, never guessed).</p>`;
+  if (tab === 'language') body = `<label class="field" style="max-width:320px">Interface language<select data-bind="me.language">${['English', 'Telugu', 'Hindi'].map(l => `<option ${m.language === l ? 'selected' : ''}>${l}</option>`).join('')}</select></label><p class="tiny" style="margin:6px 0 16px">Only English strings are bundled in this prototype; your choice is saved for when translations exist.</p>
+    <p><b>Languages you collaborate in</b></p><div class="row" style="margin-top:8px">${['English', 'Telugu', 'Hindi'].map(l => `<label class="chip ${m.matchLang.includes(l) ? 'on' : ''}"><input type="checkbox" data-array="me.matchLang" data-val="${l}" data-rerender="1" ${m.matchLang.includes(l) ? 'checked' : ''} style="accent-color:#C6A76B"> ${l}</label>`).join('')}</div>`;
+  if (tab === 'privacy') { const pr = state.privacy; const row = (p, l, d, v) => `<div class="setting-row"><div><b>${l}</b><p>${d}</p></div>${sw('privacy.' + p, v)}</div>`;
+    body = `${row('visibleInSearch', 'Appear in member search', 'Others can find your privacy-safe profile.', pr.visibleInSearch)}${row('allowIntros', 'Allow introduction requests', 'Turn off to stop receiving new introductions.', pr.allowIntros)}${row('showAvailability', 'Show availability', 'Visible on your profile card.', pr.showAvailability)}${row('showEvidence', 'Show portfolio evidence', 'Shown on your profile and Passport preview.', pr.showEvidence)}${row('pauseMatching', 'Pause matching', 'No suggestions, including Find Your Four, until you resume.', pr.pauseMatching)}
+    <p class="note" style="margin-top:12px">Contact details are hidden by default. Connections grant in-app messaging only. Blocks are respected in search and recommendations.</p>`; }
+  if (tab === 'notifications') body = notifPrefsHtml(state.notifPrefs);
+  if (tab === 'account') body = `<div class="setting-row"><div><b>Export my data</b><p>Download everything this prototype stores, as JSON.</p></div>${btn('Export', 'exportData')}</div>
+    <div class="setting-row"><div><b>Request account deletion</b><p>${state.adminState.deletion ? 'Status: ' + esc(state.adminState.deletion) + ' (demo).' : 'Starts a deletion request according to policy.'}</p></div>${state.adminState.deletion ? btn('Cancel request', 'cancelDeletion') : btn('Request deletion', 'requestDeletion', '', 'danger')}</div>
+    <div class="setting-row"><div><b>Blocked members</b><p>${state.blocked.length} blocked. Manage in the Safety centre.</p></div>${btn('Open Safety centre', 'safety')}</div>
+    <div class="setting-row"><div><b>Reset demo data</b><p>Restore the original demo state. This clears what you changed here.</p></div>${btn('Reset', 'resetDemo', '', 'danger')}</div>`;
+  return `${head('Settings', 'Editable, reversible and yours. Changes save automatically.')}
+  <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button class="tab ${tab === k ? 'active' : ''}" role="tab" aria-selected="${tab === k}" data-action="settingsTab" data-tab="${k}">${l}</button>`).join('')}</div>
+  <section class="glass-panel pad" style="max-width:820px">${body}</section>`;
+}
+function skillBlock(title, key, arr) {
+  return `<div style="margin-bottom:16px"><b>${title}</b><div class="row" style="margin:8px 0">${arr.map(s => `<span class="chip">${esc(s)} <span class="x" role="button" tabindex="0" aria-label="Remove ${esc(s)}" data-action="rmSkill" data-k="${key}" data-s="${esc(s)}">×</span></span>`).join('') || '<span class="tiny">None yet</span>'}</div><form class="inline-form" data-form="addSkill"><input type="hidden" name="k" value="${key}"><select name="s" aria-label="Choose skill">${ALL_SKILLS.filter(s => !arr.includes(s)).map(s => `<option>${esc(s)}</option>`).join('')}</select><button class="btn sm">Add</button></form></div>`;
+}
+
+/* ---------- ADMIN ---------- */
+function viewAdmin() {
+  if (state.role !== 'admin') return `${head('Admin Dashboard', 'Role-gated demonstration interface.')}<div class="glass-panel pad" style="max-width:560px"><h3>🔒 Restricted</h3><p style="margin:8px 0 14px">This area is for administrators. In this prototype you can switch to a demo admin role to explore it.</p>${btn('Switch to demo admin role', 'role', 'data-role="admin"', 'primary')}</div>`;
+  const tab = state.adminTab, tabs = ['overview', 'sessions', 'opportunities', 'moderation', 'reports', 'analytics', 'membership'];
+  const open = state.reportsQueue.filter(r => r.status === 'open');
+  let body = '';
+  if (tab === 'overview') {
+    const all = [...PEOPLE.map(p => ({id:p.id, name:p.name, role:p.role})), {id:'me', name:state.me.name + ' (you)', role:state.me.role}];
+    body = `<div class="grid g4" style="margin-bottom:16px"><div class="glass-card static pad-s"><div class="eyebrow">Members (demo)</div><h2>${all.length}</h2></div><div class="glass-card static pad-s"><div class="eyebrow">Open reports</div><h2>${open.length}</h2></div><div class="glass-card static pad-s"><div class="eyebrow">Pending opportunities</div><h2>${state.adminOpps.filter(o => o.review === 'pending').length}</h2></div><div class="glass-card static pad-s"><div class="eyebrow">Upcoming sessions</div><h2>${upcoming().length}</h2></div></div>
+    <div class="glass-panel pad table-wrap"><table class="t"><thead><tr><th>Member</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${all.map(p => { const st = state.adminState.memberStatus[p.id] || 'active'; return `<tr><td>${esc(p.name)}</td><td>${esc(p.role)}</td><td>${badge(st === 'active' ? 'Active' : 'Paused', st === 'active' ? 'b-ok' : 'b-warn')}</td><td>${p.id !== 'me' ? btn(st === 'active' ? 'Pause' : 'Reactivate', 'memberStatus', `data-id="${p.id}"`, 'sm') : ''}</td></tr>`; }).join('')}</tbody></table></div>`;
+  }
+  if (tab === 'sessions') body = `<div class="glass-panel pad"><form class="inline-form" data-form="addSession" style="margin-bottom:14px"><input type="text" name="title" placeholder="Session title" required aria-label="Title"><input type="date" name="date" required style="max-width:170px" aria-label="Date"><input type="time" name="time" value="19:00" required style="max-width:130px" aria-label="Time"><button class="btn primary sm">Add session</button></form>
+    <div class="table-wrap"><table class="t"><thead><tr><th>Session</th><th>When</th><th>RSVPs (demo)</th><th></th></tr></thead><tbody>${state.sessions.map(s => `<tr><td>${esc(s.title)}</td><td>${fmtDT(s.date)}</td><td>${s.rsvp ? 1 : 0}</td><td>${btn('Remove', 'delSession', `data-id="${s.id}"`, 'sm danger')}</td></tr>`).join('')}</tbody></table></div></div>`;
+  if (tab === 'opportunities') body = `<div class="stack">${state.adminOpps.map(o => `<article class="glass-card static pad"><div class="row between"><b>${esc(o.title)}</b>${badge(o.review, o.review === 'approved' ? 'b-ok' : o.review === 'rejected' ? 'b-bad' : 'b-warn')}</div><p>${esc(o.org)} · ${esc(OPP_TYPE[o.type])}</p><p style="margin:6px 0">${esc(o.desc)}</p>${o.review === 'pending' ? `<div class="row">${btn('Approve', 'oppReview', `data-id="${o.id}" data-r="approved"`, 'sm primary')}${btn('Request info', 'oppReview', `data-id="${o.id}" data-r="needs info"`, 'sm')}${btn('Reject', 'oppReview', `data-id="${o.id}" data-r="rejected"`, 'sm danger')}</div>` : ''}</article>`).join('')}</div>`;
+  if (tab === 'moderation') body = `<div class="stack">${state.reportsQueue.map(r => `<article class="glass-card static pad"><div class="row between"><b>${esc(r.subject)}</b>${badge(r.status, r.status === 'open' ? 'b-warn' : 'b-ok')}</div><p class="tiny">${esc(r.type)} · ${esc(r.reason)} · reported by ${esc(r.reporter)} · ${ago(r.t)}</p>${r.status === 'open' ? `<div class="row" style="margin-top:8px">${btn('Resolve', 'modAct', `data-id="${r.id}" data-r="resolved"`, 'sm primary')}${btn('Warn member', 'modAct', `data-id="${r.id}" data-r="warned"`, 'sm')}${btn('Dismiss', 'modAct', `data-id="${r.id}" data-r="dismissed"`, 'sm ghost')}</div>` : ''}</article>`).join('') || '<div class="empty glass-panel">Queue is empty.</div>'}</div>`;
+  if (tab === 'reports') { const by = k => state.reportsQueue.filter(r => r.status === k).length;
+    body = `<div class="grid g4" style="margin-bottom:16px">${['open', 'resolved', 'warned', 'dismissed'].map(k => `<div class="glass-card static pad-s"><div class="eyebrow">${k}</div><h2>${by(k)}</h2></div>`).join('')}</div><div class="glass-panel pad"><p>Reports include those submitted in this browser. Evidence is minimised and handled discreetly in a real deployment.</p><div style="margin-top:10px">${btn('Export reports (CSV)', 'exportReports')}</div></div>`; }
+  if (tab === 'analytics') { const series = [12, 15, 14, 19, 22, 21, 27, 31], mx = Math.max(...series);
+    body = `<div class="glass-panel pad"><div class="eyebrow">North Star · weekly_meaningful_collaborators (demo series)</div><div class="charts">${series.map((v, i) => `<div class="col"><span>${v}</span><i style="height:${Math.round(v / mx * 100)}%"></i><span>W${i + 1}</span></div>`).join('')}</div><p class="tiny" style="margin-top:8px">Counts distinct members with at least one evidence-backed collaboration action per trailing week. Passive opens and likes are excluded.</p></div>
+    <div class="sec-title"><h2>Countermetrics (demo)</h2></div><div class="grid g4">${[['Notification opt-outs', 3], ['Blocks', state.blocked.length], ['Reports (this browser)', state.reportsQueue.length], ['Match declines', state.four.slots.filter(s => s.status === 'declined').length]].map(([l, v]) => `<div class="glass-card static pad-s"><div class="eyebrow">${l}</div><h2>${v}</h2></div>`).join('')}</div>
+    <div class="sec-title"><h2>Live in this prototype</h2></div><div class="grid g4">${[['Intros requested', state.four.slots.filter(s => s.status !== 'none').length], ['Tasks done', state.missions.reduce((s, m) => s + m.tasks.filter(t => t.status === 'done').length, 0)], ['Messages sent', state.convos.reduce((s, c) => s + c.msgs.filter(m => m.from === 'me').length, 0)], ['RSVPs', state.sessions.filter(s => s.rsvp).length]].map(([l, v]) => `<div class="glass-card static pad-s"><div class="eyebrow">${l}</div><h2>${v}</h2></div>`).join('')}</div>`; }
+  if (tab === 'membership') body = `<div class="glass-panel pad" style="max-width:620px"><form class="form" data-form="adminConfig"><label class="field">Included paid build sessions per month<input type="number" name="n" min="0" max="31" value="${state.config.includedSessions}"></label><label class="field">Demo monthly price<input type="number" name="price" min="0" value="${state.config.price}"></label><div><button class="btn primary">Save configuration</button></div></form><p class="tiny" style="margin-top:10px">Entitlements are configuration, not code. In production they would be enforced server-side.</p></div>`;
+  return `${head('Admin Dashboard', 'Moderation, sessions, opportunities and analytics.', btn('Switch back to member', 'role', 'data-role="member"'))}
+  ${demoBanner('DEMONSTRATION DATA — nothing here reflects real members or real backend activity.')}
+  <div class="tabs" role="tablist">${tabs.map(t => `<button class="tab ${tab === t ? 'active' : ''}" role="tab" aria-selected="${tab === t}" data-action="adminTab" data-tab="${t}">${t[0].toUpperCase() + t.slice(1)}${t === 'moderation' && open.length ? ' (' + open.length + ')' : ''}</button>`).join('')}</div>${body}`;
+}
+
+/* ---------- PROFILE ---------- */
+function viewProfile() {
+  const m = state.me, pr = state.privacy;
+  return `${head('Profile', 'Your identity as other members see it — privacy-safe by design.', btn('Edit in Settings', 'go', 'data-view="settings"'))}
+  <div class="split"><section class="glass-panel pad"><h3>Identity</h3>
+    <form class="form" data-form="profileForm" style="margin-top:10px"><label class="field">Display name<input type="text" name="name" value="${esc(m.name)}" required></label><label class="field">Headline<input type="text" name="headline" value="${esc(m.headline)}"></label><label class="field">Current role<input type="text" name="role" value="${esc(m.role)}" required></label><label class="field">About<textarea name="bio">${esc(m.bio)}</textarea></label><div><button class="btn primary">Save profile</button></div></form></section>
+  <section class="glass-card static pad"><div class="eyebrow">How others see you</div><div style="text-align:center;margin:10px 0">${avatar({name:m.name, hue:38}, 'lg')}<h2 style="margin-top:8px">${esc(m.name)}</h2><p>${esc(m.role)}</p></div><p style="text-align:center">${esc(m.headline)}</p><hr class="rule"><dl class="kv"><dt>Offers</dt><dd>${chips(m.skills)}</dd><dt>Seeks</dt><dd>${chips(m.seeking)}</dd><dt>Available</dt><dd>${pr.showAvailability ? AVAIL_LABEL[m.avail] : 'Hidden'}</dd><dt>Contact</dt><dd><span class="tiny">🔒 Hidden. In-app messaging after connection.</span></dd><dt>Visible in search</dt><dd>${pr.visibleInSearch ? 'Yes' : 'No'}</dd></dl></section></div>`;
+}
+
+const VIEWS = {home:viewHome, four:viewFour, discover:viewDiscover, circles:viewCircles, missions:viewMissions, sessions:viewSessions, messages:viewMessages, opportunities:viewOpportunities, passport:viewPassport, membership:viewMembership, notifications:viewNotifications, settings:viewSettings, admin:viewAdmin, profile:viewProfile};
+const NAV_PRIMARY = [['home', 'Home'], ['four', 'Find Your Four'], ['discover', 'Discover'], ['circles', 'Circles'], ['missions', 'Build Missions'], ['sessions', 'Sessions'], ['messages', 'Messages'], ['opportunities', 'Opportunities'], ['passport', 'Builder Passport']];
+const NAV_SECONDARY = [['membership', 'Membership'], ['notifications', 'Notifications'], ['settings', 'Settings'], ['admin', 'Admin Dashboard'], ['profile', 'Profile']];
+const TITLES = Object.fromEntries([...NAV_PRIMARY, ...NAV_SECONDARY]);
+
+/* =====================================================================
+   4. NAVIGATION / ROUTER  (hash based, no page reloads)
+   ===================================================================== */
+function buildNav() {
+  const mk = ([k, l]) => `<button class="nav-item" data-action="go" data-view="${k}" data-tip="${esc(l)}" aria-label="${esc(l)}">${icon(k === 'notifications' ? 'bell' : k)}<span class="nav-text">${esc(l)}</span><span class="count" id="cnt-${k}" hidden></span></button>`;
+  $('#nav-primary').innerHTML = NAV_PRIMARY.map(mk).join('');
+  $('#nav-secondary').innerHTML = NAV_SECONDARY.map(mk).join('');
+}
+function updateChrome() {
+  $$('.nav-item').forEach(b => { const on = b.dataset.view === state.view; b.classList.toggle('active', on); if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  $('#top-title').textContent = TITLES[state.view] || 'Nightclub';
+  document.title = (TITLES[state.view] || 'Nightclub') + ' — Nightclub (Prototype)';
+  const um = unreadMsgs(), un = unreadNotifs();
+  const set = (id, n) => { const el = $(id); el.hidden = !n; el.textContent = n; };
+  set('#cnt-messages', um); set('#cnt-notifications', un); set('#bell-count', un);
+  $('#top-avatar').textContent = initials(state.me.name);
+  document.body.classList.toggle('side-collapsed', state.sidebarCollapsed);
+  document.documentElement.classList.toggle('side-collapsed', state.sidebarCollapsed);
+}
+function render(opts = {}) {
+  const v = $('#view'), y = window.scrollY, fn = VIEWS[state.view] || viewHome;
+  v.innerHTML = fn();
+  updateChrome();
+  if (opts.anim) { v.classList.remove('enter'); void v.offsetWidth; v.classList.add('enter'); window.scrollTo(0, 0); }
+  else window.scrollTo(0, y);
+  if (state.view === 'messages') scrollChat();
+}
+function scrollChat() { const s = $('#chat-scroll'); if (s) s.scrollTop = s.scrollHeight; }
+function go(view, id = null) {
+  if (!VIEWS[view]) view = 'home';
+  state.view = view; state.viewId = id || null; closeMenus(); document.body.classList.remove('nav-open');
+  if (view === 'messages' && id && state.convos.find(c => c.id === id)) { state.msg.active = id; state.msg.chatOpen = true; const c = state.convos.find(c => c.id === id); c.unread = 0; }
+  const h = '#/' + view + (id ? '/' + id : '');
+  if (location.hash !== h) { try { history.pushState(null, '', h); } catch (e) { location.hash = h; } }
+  save(); render({anim:true});
+  $('#view').focus({preventScroll:true});
+}
+function routeFromHash() {
+  const m = location.hash.match(/^#\/([a-z]+)(?:\/([\w-]+))?/);
+  if (m && VIEWS[m[1]]) { state.view = m[1]; state.viewId = m[2] || null; }
+}
+
+/* =====================================================================
+   7. INTERACTION HANDLERS  (event delegation)
+   ===================================================================== */
+const A = {};   // click actions keyed by data-action
+const F = {};   // form handlers keyed by data-form
+
+A.skip = () => $('#view').focus();
+A.toggleNav = () => document.body.classList.toggle('nav-open');
+A.closeNav = () => document.body.classList.remove('nav-open');
+A.collapse = () => { state.sidebarCollapsed = !state.sidebarCollapsed; save(); updateChrome(); };
+A.go = el => go(el.dataset.view, el.dataset.id);
+A.closeModal = () => closeModal();
+A.about = () => openModal(modalHtml('About this prototype', `<p>Nightclub is shown here as an interactive <b style="color:var(--tx)">simulation</b>. Everything is local to this browser:</p><ul style="margin:10px 0 0 18px;color:var(--tx2);display:grid;gap:6px"><li>People, circles, sessions, opportunities and billing are fictional demo data.</li><li>“Simulate” buttons stand in for other members' responses.</li><li>No backend, accounts, payments or messages leave your device. Data persists in localStorage.</li><li>Match tiers are descriptive ranking aids, never predictions of success, friendship or employment.</li></ul>`, btn('Got it', 'closeModal', '', 'primary')), false, 'About this prototype');
+
+/* menus */
+A.menu = (el) => {
+  const k = el.dataset.menu, open = $('#menu-root').firstChild;
+  if (open && el.dataset.open === '1') { closeMenus(); el.dataset.open = ''; return; }
+  $$('[data-open]').forEach(x => x.dataset.open = ''); el.dataset.open = '1';
+  if (k === 'user') openMenu(el, `<div class="menu-h">${esc(state.me.name)}</div>${mi('Profile', 'go', 'data-view="profile"')}${mi('Settings', 'go', 'data-view="settings"')}${mi('Membership', 'go', 'data-view="membership"')}${mi('Safety centre', 'safety')}<div class="menu-sep"></div><div class="menu-h">Demo role: ${state.role}</div>${state.role === 'admin' ? mi('Switch to member', 'role', 'data-role="member"') : mi('Switch to admin (demo)', 'role', 'data-role="admin"')}`);
+  if (k === 'bell') { const recent = state.notifs.slice(0, 4); openMenu(el, `<div class="menu-h">Recent notifications</div>${recent.map(n => mi(`<span style="display:block"><b>${n.read ? '' : '● '}${esc(n.title)}</b><br><span class="tiny">${ago(n.t)}</span></span>`, 'openNotif', `data-id="${n.id}"`)).join('')}<div class="menu-sep"></div>${mi('View all', 'go', 'data-view="notifications"')}${mi('Mark all read', 'markAll')}`); }
+  if (k === 'chat') { const c = state.convos.find(x => x.id === el.dataset.id); openMenu(el, `${mi('View profile', 'profile', `data-id="${c.with}"`)}${mi(c.muted ? 'Unmute conversation' : 'Mute conversation', 'muteConvo', `data-id="${c.id}"`)}<div class="menu-sep"></div>${mi('Report', 'report', `data-id="${c.with}"`, 'danger')}${mi('Block', 'block', `data-id="${c.with}"`, 'danger')}`); }
+};
+A.role = el => { state.role = el.dataset.role; save(); closeMenus(); toast(state.role === 'admin' ? 'Demo admin role enabled' : 'Back to member role'); if (state.view === 'admin') render(); };
+
+/* Home / Four */
+A.feedSave = el => { const id = el.dataset.id, i = state.feedSaved.indexOf(id); i < 0 ? state.feedSaved.push(id) : state.feedSaved.splice(i, 1); save(); render(); toast(i < 0 ? 'Saved' : 'Removed from saved'); };
+A.fourOn = () => {
+  if (!profileComplete().ok) return toast('Complete your minimum profile first', 'bad');
+  state.four.optIn = true; state.four.slots = []; ui.loading = 'four'; save(); render();
+  setTimeout(() => { state.four.slots = selectFour([]).map(id => ({id, status:'none', saved:false, dismissed:false})); ui.loading = null; save(); if (state.view === 'four') render(); toast(state.four.slots.length ? 'Your Four are ready — no one has been contacted' : 'No eligible members yet', state.four.slots.length ? '' : 'bad'); }, 900);
+};
+A.fourOff = () => { state.four.optIn = false; state.four.slots = []; save(); render(); toast('Find Your Four is off. Nobody was notified.'); };
+A.fourRefresh = () => {
+  const keep = state.four.slots.filter(s => s.status !== 'none' || s.saved);
+  ui.loading = 'four'; render();
+  setTimeout(() => { const ids = selectFour(keep.map(s => s.id)); state.four.slots = [...keep, ...ids.filter(id => !keep.find(k => k.id === id)).map(id => ({id, status:'none', saved:false, dismissed:false}))]; ui.loading = null; save(); if (state.view === 'four') render(); toast('Suggestions refreshed. Requested and saved members were kept.'); }, 700);
+};
+A.waitlist = () => { state.four.waitlist = true; save(); render(); toast('You are on the waitlist'); };
+A.fourSave = el => { const s = state.four.slots[+el.dataset.i]; s.saved = !s.saved; save(); render(); toast(s.saved ? 'Saved for later' : 'Removed'); };
+A.dismiss = el => { const s = state.four.slots[+el.dataset.i]; s.dismissed = true; if (!state.four.excluded.includes(s.id)) state.four.excluded.push(s.id); save(); render(); toast('Dismissed. They will not be suggested again.'); };
+A.undismiss = el => { const s = state.four.slots[+el.dataset.i]; s.dismissed = false; state.four.excluded = state.four.excluded.filter(x => x !== s.id); save(); render(); };
+A.withdraw = el => { const s = state.four.slots[+el.dataset.i]; s.status = 'none'; save(); render(); toast('Request withdrawn'); };
+A.simAccept = el => { const s = state.four.slots[+el.dataset.i]; acceptConnection(s.id); s.status = 'accepted'; save(); render(); toast(person(s.id).name + ' accepted (simulated)'); };
+A.simDecline = el => { const s = state.four.slots[+el.dataset.i]; s.status = 'declined'; if (!state.four.excluded.includes(s.id)) state.four.excluded.push(s.id); notify('connections', person(s.id).name + ' declined (simulated)', 'Declines are normal. A replacement can be suggested.', {view:'four'}); save(); render(); toast('Declined (simulated)'); };
+A.replace = el => {
+  const i = +el.dataset.i, others = state.four.slots.filter((s, k) => k !== i && !s.dismissed && s.status !== 'declined').map(s => s.id);
+  const pick = selectFour(others, others.length + 1).filter(id => !others.includes(id) && !state.four.slots.some(s => s.id === id))[0];
+  if (!pick) { state.four.waitlist = true; save(); render(); return toast('No further eligible members right now. You will hear only if a genuinely qualifying profile appears.'); }
+  state.four.slots[i] = {id:pick, status:'none', saved:false, dismissed:false}; save(); render(); toast('Replacement suggested: ' + person(pick).name);
+};
+function acceptConnection(id) {
+  state.connections[id] = true; state.incoming = state.incoming.filter(x => x !== id);
+  if (!state.convos.find(c => c.with === id)) state.convos.push({id:uid('cv'), with:id, unread:0, muted:false, msgs:[{from:'sys', text:'Connection accepted. Messaging is in-app only; contact details stay hidden.', t:Date.now()}]});
+  state.notifs.forEach(n => { if (n.pid === id) n.read = true; });
+  notify('connections', 'Connected with ' + person(id).name, 'You can now message in-app. Contact details remain hidden.', {view:'messages'});
+}
+A.circleFromFour = () => openModal(modalHtml('Propose a circle', `<form class="form" data-form="fourCircle" id="fc-form"><label class="field">Circle name<input type="text" name="name" value="Four Circle" required></label><label class="field">Shared objective<textarea name="goal" required placeholder="What will you build together?"></textarea></label><p class="tiny">Members: you + ${state.four.slots.filter(s => s.status === 'accepted').map(s => esc(person(s.id).name)).join(', ')}. Only members who accepted are included. Nobody is added without consent.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Create circle</button></div></form>`), false, 'Propose circle');
+F.fourCircle = fd => {
+  const acc = state.four.slots.filter(s => s.status === 'accepted'), id = uid('c');
+  state.circles.push({id, name:fd.get('name'), status:'Forming', missionId:null, members:[{id:'me', role:'Convener'}, ...acc.map(s => ({id:s.id, role:person(s.id).role}))], goals:[fd.get('goal')], agreement:{cadence:'', norms:'', confirmed:false}, posts:[]});
+  state.four.circleId = id; closeModal(); save(); toast('Circle created'); go('circles', id);
+};
+
+/* Profile modal, intro, report, block */
+A.profile = el => {
+  const p = person(el.dataset.id); if (!p) return;
+  const x = explain(p), conn = state.connections[p.id];
+  openModal(modalHtml(p.name, `<div class="row" style="margin-bottom:10px">${avatar(p, 'lg')}<div><b>${esc(p.role)}</b><p class="tiny">${esc(p.availLabel)} · ${esc(p.lang.join(', '))} · ${esc(p.tz)}</p>${conn ? badge('Connected', 'b-ok') : ''}</div></div><p>${esc(p.bio)}</p><hr class="rule"><dl class="kv"><dt>Offers</dt><dd>${chips(p.skills)}</dd><dt>Seeks</dt><dd>${chips(p.seeking)}</dd><dt>Interests</dt><dd>${chips(p.interests)}</dd><dt>Contact</dt><dd><span class="tiny">🔒 Phone and email are never shown. In-app messaging opens after a connection is accepted.</span></dd></dl>
+    <details class="why" open><summary>Why this match?</summary><div class="body"><ul>${x.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div></details>
+    <b>Evidence</b>${p.evidence.map(e => `<div style="margin:6px 0">${esc(e.t)} ${lvl(e.level)}</div>`).join('')}<p class="tiny" style="margin-top:8px">Demo persona — not a real person.</p>`,
+    `${btn('Report', 'report', `data-id="${p.id}"`)}${btn('Block', 'block', `data-id="${p.id}"`, 'danger')}${conn ? btn('Message', 'openChat', `data-id="${p.id}"`, 'primary') : btn('Request introduction', 'intro', `data-id="${p.id}"`, 'primary')}`), true, 'Profile of ' + p.name);
+};
+A.intro = el => {
+  const p = person(el.dataset.id);
+  openModal(modalHtml('Request introduction', `<form class="form" data-form="intro"><input type="hidden" name="id" value="${p.id}"><p>You are asking ${esc(p.name)} to connect. They are free to decline or not reply.</p><label class="field">Optional first message<textarea name="msg" placeholder="Share what you are building and what you'd like to try together.">Hi ${esc(p.name.split(' ')[0])} — I saw you offer ${esc(p.skills[0])}. I'm working on something small and would love to explore a first milestone together. What does your availability look like?</textarea></label><p class="note">Shared with them: your privacy-safe profile and this message. Not shared: email, phone, or precise location.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Send request</button></div></form>`), false, 'Request introduction');
+};
+F.intro = fd => {
+  const id = fd.get('id'), s = state.four.slots.find(x => x.id === id);
+  if (s) s.status = 'requested'; else if (!state.four.slots.length || true) { state.four.slots = state.four.slots; state.requests = state.requests || {}; }
+  state.requests = state.requests || {}; state.requests[id] = 'requested';
+  closeModal(); save(); render(); toast('Introduction requested. A reply is not guaranteed.');
+};
+A.report = el => {
+  const p = el.dataset.id ? person(el.dataset.id) : null;
+  openModal(modalHtml('Report ' + (p ? p.name : 'a problem'), `<form class="form" data-form="report"><input type="hidden" name="subject" value="${esc(p ? p.name : 'General')}"><label class="field">Reason<select name="reason"><option>Harassment</option><option>Spam</option><option>Privacy concern</option><option>Misleading claim</option><option>Other</option></select></label><label class="field">Details (optional)<textarea name="details" placeholder="Anything that helps a moderator. You can leave this blank."></textarea></label><p class="note">Safety tools are always free and never gamified. You will get a factual status update about this report.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Submit report</button></div></form>`), false, 'Report');
+};
+F.report = fd => {
+  state.reportsQueue.unshift({id:uid('r'), type:'profile', subject:'Report about ' + fd.get('subject'), reason:fd.get('reason'), status:'open', reporter:'You', t:Date.now()});
+  notify('safety', 'Report received', 'A moderator will review your report about ' + fd.get('subject') + '. This is a prototype; no real review occurs.', {view:'notifications'});
+  closeModal(); save(); updateChrome(); toast('Report submitted');
+};
+A.block = el => {
+  const p = person(el.dataset.id);
+  openModal(modalHtml('Block ' + p.name + '?', `<p>They will disappear from your search, suggestions and messages. You can unblock any time in the Safety centre.</p>`, `${btn('Cancel', 'closeModal')}${btn('Block', 'confirmBlock', `data-id="${p.id}"`, 'danger')}`), false, 'Block member');
+};
+A.confirmBlock = el => {
+  const id = el.dataset.id; if (!state.blocked.includes(id)) state.blocked.push(id);
+  state.four.slots = state.four.slots.filter(s => s.id !== id); state.incoming = state.incoming.filter(x => x !== id);
+  closeModal(); save(); render(); toast('Blocked'); };
+A.safety = () => {
+  openModal(modalHtml('Safety centre', `<p>Safety tools are always available and never behind a paywall.</p><hr class="rule"><b>Blocked members</b>${state.blocked.map(id => `<div class="setting-row"><span>${esc(person(id).name)}</span>${btn('Unblock', 'unblock', `data-id="${id}"`, 'sm')}</div>`).join('') || '<p class="tiny" style="margin:6px 0">None.</p>'}<hr class="rule"><b>Your reports</b>${state.reportsQueue.filter(r => r.reporter === 'You').map(r => `<div class="setting-row"><span>${esc(r.subject)}<br><span class="tiny">${esc(r.reason)} · ${ago(r.t)}</span></span>${badge(r.status, r.status === 'open' ? 'b-warn' : 'b-ok')}</div>`).join('') || '<p class="tiny" style="margin:6px 0">No reports submitted.</p>'}<hr class="rule"><div class="row">${btn('Report a problem', 'report')}${btn('Pause matching', 'pauseMatching')}${btn('Export my data', 'exportData')}</div>`), true, 'Safety centre');
+};
+A.unblock = el => { state.blocked = state.blocked.filter(x => x !== el.dataset.id); save(); A.safety(); render(); toast('Unblocked'); };
+A.pauseMatching = () => { state.privacy.pauseMatching = true; save(); render(); toast('Matching paused'); };
+
+/* Discover */
+A.discTab = el => { state.disc.tab = el.dataset.tab; save(); render(); };
+A.pickTag = el => { const d = state.disc; if (el.dataset.kind === 'skills') { d.skill = el.dataset.tag; d.q = ''; } else { d.q = el.dataset.tag; d.skill = 'any'; } d.tab = 'people'; save(); render(); };
+A.saveSearch = () => { const d = state.disc; const label = (d.q || 'All') + ' · ' + d.tab; state.savedSearches.push({id:uid('ss'), label, snap:JSON.parse(JSON.stringify(d))}); save(); render(); toast('Search saved. Digest alerts are opt-in.'); };
+A.runSaved = el => { const s = state.savedSearches.find(x => x.id === el.dataset.id); if (s) { state.disc = Object.assign({}, s.snap); save(); render(); } };
+A.delSaved = el => { state.savedSearches = state.savedSearches.filter(x => x.id !== el.dataset.id); save(); render(); };
+A.contribute = el => { const id = el.dataset.id; state.contribRequests[id] = true; save(); render(); toast('Request sent to the project owner'); };
+
+/* Circles */
+A.newCircle = () => openModal(modalHtml('New circle', `<form class="form" data-form="newCircle"><label class="field">Name<input type="text" name="name" required placeholder="e.g. Design Sprint Circle"></label><label class="field">Shared goal<input type="text" name="goal" required placeholder="What will you build?"></label><p class="note">You start alone. Invite members through accepted introductions — nobody is added without their consent.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Create</button></div></form>`), false, 'New circle');
+F.newCircle = fd => { const id = uid('c'); state.circles.push({id, name:fd.get('name'), status:'Forming', missionId:null, members:[{id:'me', role:'Convener'}], goals:[fd.get('goal')], agreement:{cadence:'', norms:'', confirmed:false}, posts:[]}); closeModal(); save(); toast('Circle created'); go('circles', id); };
+F.circleGoal = fd => { circleOf(fd.get('id')).goals.push(fd.get('goal')); save(); render(); toast('Goal added'); };
+A.delGoal = el => { circleOf(el.dataset.id).goals.splice(+el.dataset.i, 1); save(); render(); };
+F.circlePost = fd => { circleOf(fd.get('id')).posts.push({id:uid('d'), by:'me', text:fd.get('text'), t:Date.now()}); save(); render(); toast('Posted'); };
+F.agreement = fd => { const c = circleOf(fd.get('id')); c.agreement = {cadence:fd.get('cadence'), norms:fd.get('norms'), confirmed:true}; save(); render(); toast('Working agreement confirmed'); };
+A.leaveCircle = el => openModal(modalHtml('Leave this circle?', '<p>You can leave at any time. Your contributions stay in your Builder Passport.</p>', `${btn('Stay', 'closeModal')}${btn('Leave circle', 'confirmLeave', `data-id="${el.dataset.id}"`, 'danger')}`), false, 'Leave circle');
+A.confirmLeave = el => { state.circles = state.circles.filter(c => c.id !== el.dataset.id); closeModal(); save(); toast('You left the circle'); go('circles'); };
+
+/* Missions */
+A.missionTab = el => { state.missionTab = el.dataset.tab; save(); render(); };
+A.newMission = el => openModal(modalHtml('New Build Mission', `<form class="form" data-form="newMission"><input type="hidden" name="circle" value="${esc(el.dataset.circle || '')}"><label class="field">Title<input type="text" name="title" required placeholder="A small, real build"></label><label class="field">Summary<textarea name="summary" placeholder="What will exist when this is done?"></textarea></label>${el.dataset.circle ? '' : `<label class="field">Circle (optional)<select name="circle2"><option value="">Solo mission</option>${state.circles.filter(c => !c.missionId).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>`}<div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Create mission</button></div></form>`), false, 'New mission');
+F.newMission = fd => { const id = uid('m'), cid = fd.get('circle') || fd.get('circle2') || ''; state.missions.push({id, circleId:cid, title:fd.get('title'), summary:fd.get('summary') || '', tasks:[], deliverables:[], milestones:[], artifacts:[], reviews:[]}); if (cid) circleOf(cid).missionId = id; state.missionTab = 'tasks'; closeModal(); save(); toast('Mission created'); go('missions', id); };
+const mm = id => missionOf(id);
+F.newTask = fd => { mm(fd.get('id')).tasks.push({id:uid('t'), title:fd.get('title'), owner:fd.get('owner'), status:'todo'}); save(); render(); toast('Task added'); };
+F.newDeliverable = fd => { mm(fd.get('id')).deliverables.push({id:uid('dl'), title:fd.get('title'), owner:fd.get('owner'), done:false}); save(); render(); toast('Deliverable added'); };
+F.newMilestone = fd => { mm(fd.get('id')).milestones.push({id:uid('ms'), title:fd.get('title'), date:new Date(fd.get('date') + 'T12:00:00').toISOString(), done:false}); save(); render(); toast('Milestone added'); };
+A.toggleDeliv = el => { const d = mm(el.dataset.m).deliverables.find(x => x.id === el.dataset.id); d.done = !d.done; save(); render(); toast(d.done ? 'Marked delivered' : 'Reopened'); };
+A.toggleMs = el => {
+  const m = mm(el.dataset.m), x = m.milestones.find(y => y.id === el.dataset.id); x.done = !x.done;
+  if (x.done) { state.passport.contribs.unshift({id:uid('k'), title:'Milestone: ' + x.title, project:m.title.replace(' (demo mission)', ''), role:'Contributor', level:'self', evidence:'', date:new Date().toISOString(), ackRequested:false}); toast('Milestone complete — added to your Passport as self-reported'); }
+  else toast('Milestone reopened');
+  save(); render();
+};
+A.rescope = el => openModal(modalHtml('Rescope milestone', `<form class="form" data-form="rescope"><input type="hidden" name="m" value="${el.dataset.m}"><input type="hidden" name="id" value="${el.dataset.id}"><p>Plans change. Pick a date that fits what the team can actually do.</p><label class="field">New date<input type="date" name="date" required></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Update date</button></div></form>`), false, 'Rescope');
+F.rescope = fd => { mm(fd.get('m')).milestones.find(x => x.id === fd.get('id')).date = new Date(fd.get('date') + 'T12:00:00').toISOString(); closeModal(); save(); render(); toast('Milestone rescoped'); };
+F.newArtifact = fd => {
+  const f = fd.get('file'), link = (fd.get('link') || '').trim(); if (!link && !(f && f.name)) return toast('Add a link or choose a file', 'bad');
+  mm(fd.get('id')).artifacts.unshift({id:uid('a'), name:link || f.name + ' (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)', kind:link ? 'link' : 'file', by:'me', note:fd.get('note'), t:Date.now()});
+  save(); render(); toast('Artifact attached (local demo)'); };
+A.reqReview = el => { const t = mm(el.dataset.m).tasks.find(x => x.id === el.dataset.t); t.status = 'review'; save(); render(); toast('Review requested from your circle'); };
+A.addReview = el => { const m = mm(el.dataset.m); openModal(modalHtml('Add a review', `<form class="form" data-form="review"><input type="hidden" name="m" value="${m.id}"><label class="field">Task<select name="task">${m.tasks.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join('')}</select></label><label class="field">Contribution delivered<select name="delivered"><option>Yes</option><option>Partly</option><option>Not yet</option></select></label><label class="field">Responsiveness<select name="responsive"><option>Responsive</option><option>Mixed</option><option>Hard to reach</option></select></label><label class="field">Would collaborate again<select name="again"><option>Yes</option><option>Maybe</option><option>No</option></select></label><label class="field">Private note (optional)<textarea name="note"></textarea></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Save review</button></div></form>`), false, 'Add review'); };
+F.review = fd => { mm(fd.get('m')).reviews.unshift({id:uid('rv'), taskId:fd.get('task'), delivered:fd.get('delivered'), responsive:fd.get('responsive'), again:fd.get('again'), note:fd.get('note'), t:Date.now()}); closeModal(); save(); render(); toast('Review saved'); };
+
+/* Sessions */
+A.sessionTab = el => { state.sessionTab = el.dataset.tab; save(); render(); };
+A.rsvp = el => {
+  const s = state.sessions.find(x => x.id === el.dataset.id); s.rsvp = !s.rsvp;
+  if (s.rsvp) notify('sessions', 'Reserved: ' + s.title, 'Seat reserved for ' + fmtDT(s.date) + '. RSVP is not attendance.', {view:'sessions'});
+  save(); closeModal(); render(); toast(s.rsvp ? 'Seat reserved — RSVP does not count as attendance' : 'RSVP cancelled');
+};
+A.session = el => {
+  const s = state.sessions.find(x => x.id === el.dataset.id), isUp = upcoming().includes(s);
+  openModal(modalHtml(s.title, `<p class="tiny">${fmtDT(s.date)} · ${s.mins} min · ${esc(s.host)}</p><p style="margin:8px 0">${esc(s.desc)}</p><hr class="rule"><b>Resources</b>${s.rsvp ? SESSION_RES.map(r => `<div class="setting-row"><span>${esc(r.title)}</span>${btn('Open (simulated)', 'resource', '', 'sm')}</div>`).join('') : '<p class="note" style="margin-top:8px">🔒 Links appear after you reserve a seat, so they are not exposed to people outside the session.</p>'}<hr class="rule"><b>Build experiments</b>${s.experiments.map(e => `<p style="margin-top:6px">• ${esc(e.title)}${e.claimed ? ' ' + badge('Claimed', 'b-ok') : ''}</p>`).join('')}`, isUp ? btn(s.rsvp ? 'Cancel RSVP' : 'RSVP', 'rsvp', `data-id="${s.id}"`, s.rsvp ? '' : 'primary') : btn('Update attendance', 'attendance', `data-id="${s.id}"`)), false, s.title);
+};
+A.resource = () => toast('Demo resource — no real link in this prototype');
+A.attendance = el => { const id = el.dataset.id; openModal(modalHtml('Attendance', `<p>Record whether you attended. This is self-reported in the prototype.</p>`, `${btn('Attended', 'setAtt', `data-id="${id}" data-v="attended"`, 'primary')}${btn('Did not attend', 'setAtt', `data-id="${id}" data-v="missed"`)}`), false, 'Attendance'); };
+A.setAtt = el => { state.sessions.find(x => x.id === el.dataset.id).attended = el.dataset.v; closeModal(); save(); render(); toast('Attendance recorded'); };
+A.claimExp = el => { const e = state.sessions.find(x => x.id === el.dataset.s).experiments.find(x => x.id === el.dataset.id); e.claimed = !e.claimed; save(); render(); toast(e.claimed ? 'Experiment claimed' : 'Unclaimed'); };
+A.submitDemo = el => { const e = state.sessions.find(x => x.id === el.dataset.s).experiments.find(x => x.id === el.dataset.id); openModal(modalHtml('Submit demo note', `<form class="form" data-form="demoNote"><input type="hidden" name="s" value="${el.dataset.s}"><input type="hidden" name="id" value="${el.dataset.id}"><label class="field">What did you build or learn?<textarea name="note" required>${esc(e.demo)}</textarea></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Save</button></div></form>`), false, 'Demo note'); };
+F.demoNote = fd => { state.sessions.find(x => x.id === fd.get('s')).experiments.find(x => x.id === fd.get('id')).demo = fd.get('note'); closeModal(); save(); render(); toast('Demo note saved to your workspace'); };
+
+/* Messages */
+A.openConvo = el => { const c = state.convos.find(x => x.id === el.dataset.id); c.unread = 0; state.msg.active = c.id; state.msg.chatOpen = true; save(); updateChrome(); $('#convo-list').innerHTML = convoListHtml(); $('#chat').innerHTML = chatHtml(); $('#prof-prev').innerHTML = profPrevHtml(person(c.with)); $('.msg-layout').classList.add('chat-open'); scrollChat(); };
+A.chatBack = () => { state.msg.chatOpen = false; $('.msg-layout').classList.remove('chat-open'); };
+A.openChat = el => { const id = el.dataset.id; let c = state.convos.find(x => x.with === id); if (!c) return toast('Messaging opens after a connection is accepted', 'bad'); closeModal(); go('messages', c.id); };
+A.muteConvo = el => { const c = state.convos.find(x => x.id === el.dataset.id); c.muted = !c.muted; closeMenus(); save(); render(); toast(c.muted ? 'Conversation muted' : 'Unmuted'); };
+F.send = (fd, form) => {
+  const now = Date.now(); ui.sentTimes = ui.sentTimes.filter(t => now - t < 30000);
+  if (ui.sentTimes.length >= 8) return toast('Slow down a little — messages are rate limited to protect members.', 'bad');
+  const c = state.convos.find(x => x.id === fd.get('id')), text = (fd.get('text') || '').trim(); if (!text) return;
+  ui.sentTimes.push(now); c.msgs.push({from:'me', text, t:now}); save();
+  $('#chat').innerHTML = chatHtml(); $('#convo-list').innerHTML = convoListHtml(); scrollChat(); const i = $('.composer input'); if (i) i.focus();
+};
+A.simReply = el => { const c = state.convos.find(x => x.id === el.dataset.id); c.msgs.push({from:'them', text:CANNED_REPLIES[c.msgs.length % CANNED_REPLIES.length], t:Date.now(), sim:true}); save(); $('#chat').innerHTML = chatHtml(); $('#convo-list').innerHTML = convoListHtml(); scrollChat(); toast('Simulated reply added'); };
+
+/* Opportunities */
+A.oppType = el => { state.oppFilter.type = el.dataset.type; save(); render(); };
+A.opp = el => {
+  const o = [...state.opps].find(x => x.id === el.dataset.id), f = oppFit(o);
+  openModal(modalHtml(o.title, `<p class="tiny">${esc(o.org)} · ${esc(OPP_TYPE[o.type])} · ${badge('Reviewed', 'b-ok')}</p><p style="margin:8px 0">${esc(o.desc)}</p><details class="why" open><summary>Fit explanation</summary><div class="body"><ul><li>${esc(f.label)} — a ranking aid, not a prediction of outcome.</li><li>Skills you have: ${esc(f.have.join(', ') || 'none yet')}.</li><li>Skills you may need to build: ${esc(f.miss.join(', ') || 'none')}.</li><li>Goal weight: ${esc(GOAL_LABEL[o.goal])} ${Math.round(state.me.goals[o.goal] * 100)}% (you can change it in Settings).</li></ul></div></details>
+  <p class="note">This is a community introduction. Nightclub does not guarantee a job, income, customers or any response. Your contact details stay hidden unless you choose to share them.</p><hr class="rule"><b>Application status</b><p style="margin:6px 0">${esc(OPP_STATUS[o.status])}</p>${o.status !== 'none' ? `<label class="field" style="margin-top:8px">Log an outcome<select data-opp-status="${o.id}">${Object.keys(OPP_STATUS).filter(k => k !== 'none').map(k => `<option value="${k}" ${o.status === k ? 'selected' : ''}>${OPP_STATUS[k]}</option>`).join('')}</select></label>` : ''}`,
+  o.status === 'none' ? btn('Express interest', 'interest', `data-id="${o.id}"`, 'primary') : o.status === 'interested' ? btn('Mark as applied', 'oppApply', `data-id="${o.id}"`, 'primary') : ''), true, o.title);
+};
+A.interest = el => { const o = state.opps.find(x => x.id === el.dataset.id); openModal(modalHtml('Express interest', `<form class="form" data-form="interest"><input type="hidden" name="id" value="${o.id}"><p>You are expressing interest in <b style="color:var(--tx)">${esc(o.title)}</b>.</p><label class="field"><span><input type="checkbox" name="consent" required style="accent-color:#C6A76B"> I agree to share my privacy-safe Builder Passport summary with the poster. My email and phone stay hidden.</span></label><label class="field">Optional note<textarea name="note"></textarea></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Send interest</button></div></form>`), false, 'Express interest'); };
+F.interest = fd => { const o = state.opps.find(x => x.id === fd.get('id')); o.status = 'interested'; closeModal(); save(); render(); toast('Interest sent. A response is not guaranteed.'); };
+A.oppApply = el => { const o = state.opps.find(x => x.id === el.dataset.id); o.status = 'applied'; closeModal(); save(); render(); toast('Status: applied'); };
+
+/* Passport */
+A.passportPreview = () => { const me = state.me, pr = state.privacy; openModal(modalHtml('Public view (preview)', `<div class="row">${avatar({name:me.name, hue:38}, 'lg')}<div><h3>${esc(me.name)}</h3><p>${esc(me.headline)}</p></div></div><div style="margin:10px 0">${chips(me.skills)}</div>${pr.showEvidence ? state.passport.contribs.map(c => `<div style="margin:8px 0"><b>${esc(c.title)}</b> ${lvl(c.level)}<br><span class="tiny">${esc(c.project)} · ${esc(c.role)}</span></div>`).join('') : '<p class="tiny">Evidence hidden by your privacy settings.</p>'}<p class="note">Contact details are never shown. This preview reflects your privacy settings.</p>`), true, 'Public preview'); };
+A.addContrib = () => openModal(modalHtml('Add contribution', `<form class="form" data-form="contrib"><label class="field">Title<input type="text" name="title" required></label><label class="field">Project<input type="text" name="project" required></label><label class="field">Your role<input type="text" name="role" required></label><label class="field">Evidence link (optional)<input type="text" name="evidence" placeholder="https://…"></label><p class="note">New contributions start as self-reported. Peers can acknowledge them; reviewed artifacts can verify them.</p><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Add</button></div></form>`), false, 'Add contribution');
+F.contrib = fd => { state.passport.contribs.unshift({id:uid('k'), title:fd.get('title'), project:fd.get('project'), role:fd.get('role'), level:'self', evidence:fd.get('evidence') || '', date:new Date().toISOString(), ackRequested:false}); closeModal(); save(); render(); toast('Added as self-reported'); };
+const kc = id => state.passport.contribs.find(c => c.id === id);
+A.evidence = el => { const c = kc(el.dataset.id); openModal(modalHtml('Evidence link', `<form class="form" data-form="evidenceForm"><input type="hidden" name="id" value="${c.id}"><label class="field">Link or description<input type="text" name="e" value="${esc(c.evidence)}" required></label><div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-action="closeModal">Cancel</button><button class="btn primary">Save</button></div></form>`), false, 'Evidence'); };
+F.evidenceForm = fd => { kc(fd.get('id')).evidence = fd.get('e'); closeModal(); save(); render(); toast('Evidence saved'); };
+A.reqAck = el => { kc(el.dataset.id).ackRequested = true; save(); render(); toast('Acknowledgement requested from collaborators'); };
+A.simAck = el => { const c = kc(el.dataset.id); c.level = 'peer'; c.ackRequested = false; state.passport.acks.unshift({id:uid('ak'), from:'p5', text:'Confirmed this contribution on the shared project (simulated).', t:Date.now()}); save(); render(); toast('Peer acknowledgement received (simulated)'); };
+A.simVerify = el => { kc(el.dataset.id).level = 'artifact'; save(); render(); toast('Artifact verified (simulated reviewer)'); };
+A.delContrib = el => { state.passport.contribs = state.passport.contribs.filter(c => c.id !== el.dataset.id); save(); render(); toast('Removed'); };
+
+/* Membership */
+A.manageSub = () => { const m = state.membership; openModal(modalHtml('Manage subscription', `<div class="setting-row"><div><b>Auto-renew</b><p>Renews on ${fmtD(m.renewsOn)}.</p></div>${btn(m.autoRenew ? 'Turn off' : 'Turn on', 'toggleRenew', '', 'sm')}</div><div class="setting-row"><div><b>Payment method</b><p>${esc(m.payment)}</p></div>${btn('Update (demo)', 'updatePay', '', 'sm')}</div><div class="setting-row"><div><b>${m.status === 'active' ? 'Cancel membership' : 'Resume membership'}</b><p>${m.status === 'active' ? 'One step, no hoops. Access continues until your current period ends.' : 'You can resume at any time.'}</p></div>${m.status === 'active' ? btn('Cancel…', 'cancelSub', '', 'sm danger') : btn('Resume', 'resumeSub', '', 'sm primary')}</div>`), false, 'Manage subscription'); };
+A.toggleRenew = () => { state.membership.autoRenew = !state.membership.autoRenew; save(); A.manageSub(); render(); toast('Auto-renew ' + (state.membership.autoRenew ? 'on' : 'off')); };
+A.updatePay = () => toast('Demo only — no payment details are collected here');
+A.cancelSub = () => openModal(modalHtml('Cancel membership?', `<p>If you cancel: you keep access until <b style="color:var(--tx)">${fmtD(state.membership.renewsOn)}</b>, you will not be charged again, and your Builder Passport and data stay yours.</p><p class="tiny" style="margin-top:8px">You can resume any time. There are no further screens.</p>`, `${btn('Keep membership', 'closeModal')}${btn('Cancel membership', 'confirmCancel', '', 'danger')}`), false, 'Cancel membership');
+A.confirmCancel = () => { state.membership.status = 'cancelled'; state.membership.autoRenew = false; closeModal(); save(); render(); toast('Membership cancelled. Access continues until the period ends.'); };
+A.resumeSub = () => { state.membership.status = 'active'; state.membership.autoRenew = true; closeModal(); save(); render(); toast('Membership resumed'); };
+
+/* Notifications */
+A.notifFilter = el => { state.notifFilter = el.dataset.f; save(); render(); };
+A.markAll = () => { state.notifs.forEach(n => n.read = true); closeMenus(); save(); render(); toast('All marked read'); };
+A.toggleRead = el => { const n = state.notifs.find(x => x.id === el.dataset.id); n.read = !n.read; save(); render(); };
+A.openNotif = el => { const n = state.notifs.find(x => x.id === el.dataset.id); n.read = true; save(); closeMenus(); go(n.link.view, n.link.id); };
+A.acceptReq = el => { const id = el.dataset.id; acceptConnection(id); save(); render(); toast('Connected with ' + person(id).name + '. In-app chat is open.'); };
+A.declineReq = el => { const id = el.dataset.id; state.incoming = state.incoming.filter(x => x !== id); state.notifs.forEach(n => { if (n.pid === id) n.read = true; }); save(); render(); toast('Request declined. They are not told why.'); };
+
+/* Settings */
+A.settingsTab = el => { state.settingsTab = el.dataset.tab; save(); render(); };
+A.preset = el => { state.me.goals = Object.assign({}, GOAL_PRESETS[el.dataset.p]); save(); render(); toast('Preset applied: ' + el.dataset.p); };
+A.rmSkill = el => { const k = el.dataset.k; state.me[k] = state.me[k].filter(s => s !== el.dataset.s); save(); render(); };
+F.addSkill = fd => { const k = fd.get('k'), s = fd.get('s'); if (s && !state.me[k].includes(s)) state.me[k].push(s); save(); render(); toast('Skill added'); };
+A.acceptSug = el => { const s = el.dataset.s; if (!state.me.skills.includes(s)) state.me.skills.push(s); state.me.suggested = state.me.suggested.filter(x => x !== s); save(); render(); toast('Added to your skills'); };
+A.dismissSug = el => { state.me.suggested = state.me.suggested.filter(x => x !== el.dataset.s); save(); render(); };
+A.exportData = () => { const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'}), a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'nightclub-prototype-data.json'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); toast('Data exported'); };
+A.requestDeletion = () => openModal(modalHtml('Request account deletion?', '<p>In a real deployment this starts a deletion process according to policy. Here it only records a demo request, which you can cancel.</p>', `${btn('Keep my account', 'closeModal')}${btn('Request deletion', 'confirmDeletion', '', 'danger')}`), false, 'Delete account');
+A.confirmDeletion = () => { state.adminState.deletion = 'requested'; closeModal(); save(); render(); toast('Deletion requested (demo)'); };
+A.cancelDeletion = () => { state.adminState.deletion = null; save(); render(); toast('Deletion request cancelled'); };
+A.resetDemo = () => openModal(modalHtml('Reset demo data?', '<p>This restores the original demo state and clears your changes.</p>', `${btn('Cancel', 'closeModal')}${btn('Reset', 'confirmReset', '', 'danger')}`), false, 'Reset');
+A.confirmReset = () => { try { localStorage.removeItem(STORE_KEY); } catch (e) {} state = defaultState(); state.seenIntro = true; closeModal(); saveNow(); go('home'); toast('Demo data reset'); };
+
+/* Admin */
+A.adminTab = el => { state.adminTab = el.dataset.tab; save(); render(); };
+A.memberStatus = el => { const s = state.adminState.memberStatus; s[el.dataset.id] = (s[el.dataset.id] || 'active') === 'active' ? 'paused' : 'active'; save(); render(); toast('Member status updated (demo)'); };
+F.addSession = fd => { state.sessions.push({id:uid('s'), title:fd.get('title'), host:'Founder Labs (demo host)', date:new Date(fd.get('date') + 'T' + fd.get('time')).toISOString(), mins:90, desc:'Added by an admin (demo).', rsvp:false, attended:null, experiments:[]}); save(); render(); toast('Session added'); };
+A.delSession = el => { state.sessions = state.sessions.filter(s => s.id !== el.dataset.id); save(); render(); toast('Session removed'); };
+A.oppReview = el => { const o = state.adminOpps.find(x => x.id === el.dataset.id); o.review = el.dataset.r; if (o.review === 'approved') { o.verified = true; if (!state.opps.find(x => x.id === o.id)) state.opps.push(Object.assign({}, o, {verified:true})); } save(); render(); toast('Opportunity ' + o.review); };
+A.modAct = el => { const r = state.reportsQueue.find(x => x.id === el.dataset.id); r.status = el.dataset.r; if (r.reporter === 'You') notify('safety', 'Report update', 'Your report “' + r.subject + '” is now ' + r.status + '.', {view:'notifications'}); save(); render(); toast('Marked ' + r.status); };
+A.exportReports = () => { const rows = [['id', 'type', 'subject', 'reason', 'status', 'reporter'], ...state.reportsQueue.map(r => [r.id, r.type, r.subject, r.reason, r.status, r.reporter])]; const csv = rows.map(r => r.map(x => '"' + String(x).replace(/"/g, '""') + '"').join(',')).join('\n'); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'})); a.download = 'reports-demo.csv'; document.body.appendChild(a); a.click(); a.remove(); toast('Reports exported'); };
+F.adminConfig = fd => { state.config.includedSessions = Math.max(0, +fd.get('n') || 0); state.config.price = Math.max(0, +fd.get('price') || 0); save(); render(); toast('Configuration saved — member views update immediately'); };
+F.profileForm = fd => { state.me.name = fd.get('name'); state.me.headline = fd.get('headline'); state.me.role = fd.get('role'); state.me.bio = fd.get('bio'); save(); render(); toast('Profile saved'); };
+
+/* ---- global listeners ---- */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-action]');
+  if (!t) { if (!e.target.closest('.glass-menu')) { closeMenus(); $$('[data-open]').forEach(x => x.dataset.open = ''); } return; }
+  if (t.dataset.action !== 'menu' && !t.closest('.glass-menu')) { closeMenus(); $$('[data-open]').forEach(x => x.dataset.open = ''); }
+  const fn = A[t.dataset.action]; if (!fn) return;
+  try { fn(t, e); } catch (err) { console.error(err); toast('Something went wrong with that action', 'bad'); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if ($('#overlay-root').classList.contains('open')) closeModal(); closeMenus(); document.body.classList.remove('nav-open'); }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[role=button][data-action]')) { e.preventDefault(); e.target.click(); }
+});
+document.addEventListener('submit', e => {
+  const f = e.target.closest('form[data-form]'); if (!f) return; e.preventDefault();
+  const h = F[f.dataset.form]; if (!h) return;
+  try { h(new FormData(f), f); } catch (err) { console.error(err); toast('Something went wrong saving that', 'bad'); }
+});
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.disc) { state.disc[t.dataset.disc] = t.value; save(); const r = $('#disc-results'); if (r) r.innerHTML = discoverResults(); }
+  else if (t.hasAttribute('data-msgsearch')) { state.msg.q = t.value; $('#convo-list').innerHTML = convoListHtml(); }
+  else if (t.dataset.goal) { setGoalPct(t.dataset.goal, +t.value); GOAL_KEYS.forEach(k => { const v = Math.round(state.me.goals[k] * 100); $('#gv-' + k).textContent = v + '%'; if (k !== t.dataset.goal) $('#g-' + k).value = v; }); $('#goal-total').textContent = Math.round(sumGoals(state.me.goals) * 100) + '%'; }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.goal) { save(); toast('Goal weights updated — matching and opportunity ranking use them'); return; }
+  if (t.dataset.disc) return;
+  if (t.dataset.bind) { const v = t.type === 'checkbox' ? t.checked : t.value; setPath(state, t.dataset.bind, v); if (t.dataset.bind === 'privacy.pauseMatching' && v) toast('Matching paused'); else toast('Saved'); save(); if (t.dataset.rerender) render(); updateChrome(); return; }
+  if (t.dataset.array) { const arr = getPath(state, t.dataset.array), v = t.dataset.val, i = arr.indexOf(v); if (t.checked && i < 0) arr.push(v); if (!t.checked && i >= 0) arr.splice(i, 1); save(); toast('Saved'); if (t.dataset.rerender) render(); return; }
+  if (t.dataset.taskStatus) { const [m, id] = t.dataset.taskStatus.split('|'); const task = mm(m).tasks.find(x => x.id === id); task.status = t.value; save(); render(); toast('Task → ' + TASK_STATUS[t.value]); return; }
+  if (t.dataset.taskOwner) { const [m, id] = t.dataset.taskOwner.split('|'); mm(m).tasks.find(x => x.id === id).owner = t.value; save(); render(); toast('Owner updated'); return; }
+  if (t.dataset.circleStatus) { circleOf(t.dataset.circleStatus).status = t.value; save(); render(); toast('Circle status: ' + t.value); return; }
+  if (t.dataset.oppStatus) { const o = state.opps.find(x => x.id === t.dataset.oppStatus); o.status = t.value; save(); render(); toast('Outcome logged — this helps future recommendations'); return; }
+});
+// Card spotlight: tracks the pointer over any glass card (hover illumination) and nudges the 3D scene
+document.addEventListener('pointermove', e => {
+  const c = e.target.closest && e.target.closest('.glass-card'); if (!c) return;
+  const r = c.getBoundingClientRect(); c.style.setProperty('--mx', (e.clientX - r.left) + 'px'); c.style.setProperty('--my', (e.clientY - r.top) + 'px');
+}, {passive:true});
+document.addEventListener('pointerover', e => { if (e.target.closest && e.target.closest('.glass-card, .btn')) Scene.pulse(); }, {passive:true});
+window.addEventListener('hashchange', () => { routeFromHash(); render({anim:true}); });
+
+/* =====================================================================
+   3. BACKGROUND 3D ENVIRONMENT  (Three.js; falls back to CSS 3D)
+   ===================================================================== */
+const Scene = (() => {
+  let renderer, scene, camera, clock, raf = 0, t = 0, ready = false, pulseV = 0;
+  const mouse = {x:0, y:0, tx:0, ty:0}, spin = [], floaters = [], spheres = [];
+  let particles, pPos, pSpeed, statue, temple, rim;
+  const mq = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : {matches:false};
+  const webglOK = () => { try { const c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl'))); } catch (e) { return false; } };
+  const fail = why => { console.warn('3D background unavailable:', why); document.documentElement.classList.add('no-webgl'); ready = false; };
+
+  function envMap() {   // procedural studio-light environment so glass and marble get believable reflections
+    const c = document.createElement('canvas'); c.width = 512; c.height = 256; const g = c.getContext('2d');
+    const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, '#2a2f3a'); gr.addColorStop(.5, '#0d0f14'); gr.addColorStop(1, '#050608');
+    g.fillStyle = gr; g.fillRect(0, 0, 512, 256);
+    g.fillStyle = 'rgba(255,240,210,.95)'; g.fillRect(60, 40, 90, 16); g.fillRect(330, 70, 120, 10);
+    g.fillStyle = 'rgba(168,183,200,.75)'; g.fillRect(200, 28, 60, 40); g.fillRect(420, 120, 50, 60);
+    const tex = new THREE.CanvasTexture(c); tex.mapping = THREE.EquirectangularReflectionMapping;
+    const pm = new THREE.PMREMGenerator(renderer); const env = pm.fromEquirectangular(tex).texture; tex.dispose(); pm.dispose(); return env;
+  }
+  function build() {
+    renderer = new THREE.WebGLRenderer({canvas:$('#bg'), antialias:true, alpha:true, powerPreference:'low-power'});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75)); renderer.setSize(innerWidth, innerHeight, false);
+    renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .9;
+    scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x090A0D, .032);   // distance fog doubles as subtle depth-of-field
+    try { scene.environment = envMap(); } catch (e) { /* reflections are optional */ }
+    camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, .1, 100); camera.position.set(0, 0, 14);
+    scene.add(new THREE.AmbientLight(0x8e97a8, .45));
+    const key = new THREE.DirectionalLight(0xffe7bf, 1.1); key.position.set(-6, 8, 6); scene.add(key);
+    rim = new THREE.PointLight(0xA8B7C8, 1.2, 40); rim.position.set(8, -2, 4); scene.add(rim);
+
+    const marble = new THREE.MeshPhysicalMaterial({color:0xE7E0D2, roughness:.38, metalness:0, clearcoat:.6, clearcoatRoughness:.35});
+    const gold = new THREE.MeshStandardMaterial({color:0xC6A76B, metalness:.9, roughness:.32});
+    const glass = new THREE.MeshPhysicalMaterial({color:0xBFD0E0, roughness:.04, metalness:0, transparent:true, opacity:.3, clearcoat:1, clearcoatRoughness:0, envMapIntensity:1.5});
+
+    // Abstract marble statue: lathe-turned torso/amphora silhouette with a gold ring
+    const prof = [[0, 0], [1.1, 0], [1.22, .15], [1.0, .3], [.8, .8], [.65, 1.5], [.7, 2.2], [.95, 2.9], [1.05, 3.4], [.9, 3.9], [.55, 4.2], [.45, 4.6], [.6, 4.9], [.5, 5.2], [.25, 5.35], [0, 5.4]].map(p => new THREE.Vector2(p[0], p[1]));
+    statue = new THREE.Group(); const body = new THREE.Mesh(new THREE.LatheGeometry(prof, 56), marble); statue.add(body);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.12, .035, 12, 90), gold); ring.rotation.x = Math.PI / 2; ring.position.y = 3.3; statue.add(ring);
+    statue.position.set(-6.4, -3.2, -4); statue.scale.setScalar(1.1); scene.add(statue);
+
+    // Colonnade fragment with pediment (procedural classical architecture)
+    temple = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const col = new THREE.Group();
+      const base = new THREE.Mesh(new THREE.BoxGeometry(1.5, .25, 1.5), marble); base.position.y = .12;
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(.42, .5, 4.2, 20), marble); shaft.position.y = 2.35;   // faceted = fluted look
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(.62, .45, .35, 20), marble); cap.position.y = 4.6;
+      const abacus = new THREE.Mesh(new THREE.BoxGeometry(1.5, .22, 1.5), marble); abacus.position.y = 4.88;
+      col.add(base, shaft, cap, abacus); col.position.x = (i - 1) * 2.2; temple.add(col);
+    }
+    const arch = new THREE.Mesh(new THREE.BoxGeometry(6.8, .45, 1.6), marble); arch.position.y = 5.2; temple.add(arch);
+    const shp = new THREE.Shape(); shp.moveTo(-3.6, 0); shp.lineTo(3.6, 0); shp.lineTo(0, 1.35); shp.closePath();
+    const ped = new THREE.Mesh(new THREE.ExtrudeGeometry(shp, {depth:.7, bevelEnabled:false}), marble); ped.position.set(0, 5.42, -.35); temple.add(ped);
+    temple.position.set(7.2, -3.4, -8); temple.rotation.y = -.45; scene.add(temple);
+
+    // Floating architectural fragments
+    [[-3.2, 3.1, -3, .55], [3.4, -2.8, -2, .4], [-8.4, 1.2, -6, .7]].forEach(([x, y, z, s], i) => {
+      const m = i % 2 ? new THREE.Mesh(new THREE.BoxGeometry(1.8, .35, .9), marble) : new THREE.Mesh(new THREE.CylinderGeometry(.5, .5, .7, 18), marble);
+      m.position.set(x, y, z); m.scale.setScalar(s * 1.4); m.rotation.set(Math.random() * 3, Math.random() * 3, 0); m.userData = {y0:y, ph:Math.random() * 6, sp:.1 + Math.random() * .15}; scene.add(m); floaters.push(m);
+    });
+    // Floating glass spheres
+    [[-9, 3.5, -5, .9], [-4.5, -2.2, 0, .45], [2.2, 3.8, -2, .6], [5.6, 1, 1, .5], [9, -1.4, -5, 1.1], [-1.2, -4, -3, .7], [0.6, 0.6, -9, 1.3], [7.8, 4.2, -7, .8]].forEach(([x, y, z, r], i) => {
+      const s = new THREE.Mesh(new THREE.SphereGeometry(r, 40, 28), glass); s.position.set(x, y, z); s.userData = {y0:y, ph:i * 1.3, sp:.18 + (i % 4) * .05, r}; scene.add(s); spheres.push(s);
+    });
+    // Slowly rotating geometry
+    const ico = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3, 1), new THREE.MeshBasicMaterial({color:0xC6A76B, wireframe:true, transparent:true, opacity:.32})); ico.position.set(4.2, 3.2, -4); scene.add(ico); spin.push([ico, .08, .12]);
+    const tor = new THREE.Mesh(new THREE.TorusGeometry(1.5, .03, 12, 90), new THREE.MeshStandardMaterial({color:0xA8B7C8, metalness:.8, roughness:.3})); tor.position.set(-3, 3.4, -6); scene.add(tor); spin.push([tor, .15, .05]);
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(3, 4.2), new THREE.MeshPhysicalMaterial({color:0xffffff, transparent:true, opacity:.07, roughness:.1, side:THREE.DoubleSide, clearcoat:1})); pane.position.set(8.4, -.2, -2.2); pane.rotation.y = -.5; scene.add(pane); spin.push([pane, 0, .06]);
+    // Soft volumetric light shafts (additive cones)
+    [[-5, 7, -6, .15], [6, 7.5, -8, -.2]].forEach(([x, y, z, rz]) => { const cone = new THREE.Mesh(new THREE.CylinderGeometry(.2, 3.2, 16, 24, 1, true), new THREE.MeshBasicMaterial({color:0xC6A76B, transparent:true, opacity:.035, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide})); cone.position.set(x, y, z); cone.rotation.z = rz; scene.add(cone); });
+    // Drifting particles, each at its own speed
+    const N = 420; pPos = new Float32Array(N * 3); pSpeed = new Float32Array(N);
+    for (let i = 0; i < N; i++) { pPos[i * 3] = (Math.random() - .5) * 28; pPos[i * 3 + 1] = (Math.random() - .5) * 16; pPos[i * 3 + 2] = -10 + Math.random() * 14; pSpeed[i] = .05 + Math.random() * .22; }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    particles = new THREE.Points(geo, new THREE.PointsMaterial({color:0xE7E0D2, size:.07, transparent:true, opacity:.55, sizeAttenuation:true, depthWrite:false})); scene.add(particles);
+    clock = new THREE.Clock();
+  }
+  function draw(dt) {
+    t += dt; mouse.x += (mouse.tx - mouse.x) * .045; mouse.y += (mouse.ty - mouse.y) * .045;
+    camera.position.x = mouse.x * 1.5; camera.position.y = mouse.y * .9; camera.lookAt(0, 0, 0);   // cursor parallax
+    statue.rotation.y += dt * .12; temple.rotation.y = -.45 + Math.sin(t * .1) * .06 + mouse.x * .05;
+    spin.forEach(([o, sx, sy]) => { o.rotation.x += dt * sx; o.rotation.y += dt * sy; });
+    floaters.forEach(f => { f.position.y = f.userData.y0 + Math.sin(t * f.userData.sp * 4 + f.userData.ph) * .35; f.rotation.x += dt * .12; f.rotation.y += dt * .08; });
+    const k = 1 + pulseV * .035;
+    spheres.forEach(s => { s.position.y = s.userData.y0 + Math.sin(t * s.userData.sp * 3 + s.userData.ph) * .45; s.scale.setScalar(k); });
+    for (let i = 0; i < pSpeed.length; i++) { pPos[i * 3 + 1] += pSpeed[i] * dt; pPos[i * 3] += Math.sin(t * .2 + i) * dt * .02; if (pPos[i * 3 + 1] > 8) pPos[i * 3 + 1] = -8; }
+    particles.geometry.attributes.position.needsUpdate = true;
+    rim.intensity = 1.2 + pulseV * .8; pulseV *= .94;
+    renderer.render(scene, camera);
+  }
+  function loop() { raf = requestAnimationFrame(loop); draw(Math.min(clock.getDelta(), .05)); }
+  function start() { if (!ready || raf) return; if (mq.matches) { draw(0); return; } clock.getDelta(); loop(); }
+  function stop() { cancelAnimationFrame(raf); raf = 0; }
+  function resize() { if (!ready) return; renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); if (!raf) draw(0); }
+  return {
+    init() {
+      if (!window.THREE || !webglOK()) return fail(window.THREE ? 'WebGL not supported' : 'Three.js not loaded');
+      try { build(); ready = true; } catch (err) { return fail(err); }
+      addEventListener('resize', resize);
+      addEventListener('pointermove', e => { if (mq.matches) return; mouse.tx = (e.clientX / innerWidth - .5) * 2; mouse.ty = -(e.clientY / innerHeight - .5) * 2; }, {passive:true});
+      document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
+      if (mq.addEventListener) mq.addEventListener('change', () => { stop(); start(); });
+      start();
+    },
+    pulse() { pulseV = Math.min(1, pulseV + .5); }
+  };
+})();
+
+/* =====================================================================
+   INIT
+   ===================================================================== */
+function init() {
+  state = loadState();
+  buildNav();
+  routeFromHash();
+  if (state.sidebarCollapsed) document.body.classList.add('side-collapsed');
+  render({anim:true});
+  Scene.init();
+  setTimeout(() => $('#boot').classList.add('done'), 550);
+  if (!state.seenIntro) { state.seenIntro = true; save(); setTimeout(() => A.about(), 900); }
+  window.addEventListener('beforeunload', saveNow);
+}
+init();
+</script>
+</body>
+</html>
